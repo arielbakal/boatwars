@@ -32,6 +32,7 @@ export default class InputHandler {
             if (k === 's') state.inputs.s = true;
             if (k === 'd') state.inputs.d = true;
             if (k === ' ') state.inputs.space = true;
+            if (k === 'shift') state.inputs.shift = true;
             // Inventory slots
             const idx = parseInt(k) - 1;
             if (idx >= 0 && idx < 8) {
@@ -56,6 +57,11 @@ export default class InputHandler {
                 // If switching to first person, reset vertical angle for better view
                 if (state.player.cameraMode === 'first') state.player.cameraAngle.y = 0.0;
             }
+            // C to toggle ship camera mode (chase / cockpit)
+            if (k === 'c' && state.phase === 'playing' && state.isOnBoat) {
+                state.shipCameraMode = state.shipCameraMode === 'chase' ? 'cockpit' : 'chase';
+                sfx.select();
+            }
             // E to pick up nearby tool OR board/exit boat
             if (k === 'e' && state.phase === 'playing' && !state.isBoardingBoat) {
                 if (this._nearestTool) {
@@ -74,6 +80,7 @@ export default class InputHandler {
             if (k === 's') state.inputs.s = false;
             if (k === 'd') state.inputs.d = false;
             if (k === ' ') state.inputs.space = false;
+            if (k === 'shift') state.inputs.shift = false;
         });
     }
 

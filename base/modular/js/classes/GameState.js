@@ -45,7 +45,7 @@ export default class GameState {
         this.isDead = false;
         this.deathTimer = 0;
         this.statBoosts = [];
-        this.inputs = { w: false, a: false, s: false, d: false, space: false };
+        this.inputs = { w: false, a: false, s: false, d: false, space: false, shift: false, pitchUp: false, pitchDown: false };
         this.sensitivity = 0.002;
 
         // Multi-island data (populated by GameEngine)
@@ -71,12 +71,17 @@ export default class GameState {
         this.mouseX = 0;
         this.mouseY = 0;
 
-        // Boat navigation
-        this.isOnBoat = false;
-        this.activeBoat = null;
-        this.boatSpeed = 0;
-        this.boatMaxSpeed = 0.12;
-        this.boatRotation = 0;
+        // Ship navigation (3D spaceflight)
+        this.isOnBoat = false;         // true while piloting ship
+        this.activeBoat = null;        // ref to the ship Object3D
+        this.boatSpeed = 0;            // scalar speed (magnitude of shipVelocity, for HUD)
+        this.boatRotation = 0;         // legacy yaw — kept for compat but unused in 3D mode
+        this.shipQuaternion = new THREE.Quaternion();  // full 3D orientation
+        this.shipVelocity = new THREE.Vector3();       // 3D momentum vector
+        this.shipFlightMode = 'space'; // 'planet' | 'transition' | 'space'
+        this.shipPlanetBlend = 1.0;    // 0=full planet mode, 1=full space mode
+        this.shipNearestPlanet = null; // nearest planet ref while flying
+        this.shipCameraMode = 'chase'; // 'chase' | 'cockpit'
 
         // Boarding animation
         this.isBoardingBoat = false;

@@ -1,16 +1,30 @@
 // =====================================================
-// BOAT/SPACESHIP SYSTEM - Adapted for spherical planets
+// SPACESHIP SYSTEM - Full 3D flight with quaternion orientation
+// 4DOF: yaw + pitch, auto-leveled roll
+// Dual flight modes: planet-proximity vs deep-space
+// Chase camera + cockpit view toggle
 // =====================================================
 
 import {
-    BOAT_BASE_MAX_SPEED, BOAT_BASE_ACCELERATION, BOAT_BASE_BRAKE, BOAT_BASE_TURN_SPEED,
-    BOAT_BASE_DRAG, BOAT_BASE_HEALTH,
-    BOAT_REVERSE_FACTOR, BOAT_MIN_SPEED, BOAT_COLLISION_RADIUS, BOAT_PROXIMITY_RANGE,
-    BOAT_DECK_Y_OFFSET, BOAT_PLAYER_Y_OFFSET,
-    BOARDING_WALK_SPEED, BOARDING_HOP_SPEED, BOARDING_SETTLE_SPEED,
-    BOARDING_HOP_HEIGHT, BOARDING_SIDE_DIST, CAT_BOARDING_DELAY
+    SHIP_MAX_SPEED, SHIP_ACCELERATION, SHIP_BRAKE, SHIP_TURN_SPEED,
+    SHIP_DRAG, SHIP_HEALTH,
+    SHIP_REVERSE_FACTOR, SHIP_MIN_SPEED, SHIP_COLLISION_RADIUS, SHIP_PROXIMITY_RANGE,
+    SHIP_DECK_Y_OFFSET, SHIP_PLAYER_Y_OFFSET,
+    SHIP_PITCH_SPEED, SHIP_YAW_SPEED,
+    SHIP_GRAVITY_STRENGTH, SHIP_GRAVITY_RANGE,
+    SHIP_PLANET_MODE_RADIUS, SHIP_SPACE_MODE_RADIUS,
+    SHIP_AUTO_LEVEL_SPEED, SHIP_MAX_PLANET_PITCH,
+    BOARDING_WALK_SPEED, CAT_BOARDING_DELAY,
+    CAMERA_DISTANCE_BOAT
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
+
+// Reusable temp vectors to reduce GC pressure
+const _tmpVec = new THREE.Vector3();
+const _tmpVec2 = new THREE.Vector3();
+const _tmpVec3 = new THREE.Vector3();
+const _tmpQuat = new THREE.Quaternion();
+const _tmpQuat2 = new THREE.Quaternion();
 
 export default class BoatSystem {
     constructor(ui) {
@@ -20,6 +34,10 @@ export default class BoatSystem {
     }
 
     get nearestBoat() { return this._nearestBoat; }
+
+    // ===========================================
+    // BOARDING / DISEMBARKING
+    // ===========================================
 
     boardBoat(boat, context) {
         const { state, audio, playerCat } = context;
@@ -49,7 +67,12 @@ export default class BoatSystem {
         state.isOnBoat = true;
         state.activeBoat = boat;
         state.boatSpeed = 0;
-        state.boatRotation = 0;
+
+        // Initialize 3D state from current ship mesh orientation
+        state.shipQuaternion.copy(boat.quaternion);
+        state.shipVelocity.set(0, 0, 0);
+        state.shipCameraMode = 'chase';
+
         this.showBoatHUD(true);
         if (playerController.playerGroup) {
             playerController.playerGroup.visible = true;
@@ -58,7 +81,7 @@ export default class BoatSystem {
     }
 
     disembarkBoat(context) {
-        const { state, audio, playerController, playerCat, factory } = context;
+        const { state, audio, playerController, playerCat } = context;
         if (!state.activeBoat) return;
         const boatPos = state.activeBoat.position;
 
@@ -66,9 +89,12 @@ export default class BoatSystem {
         const result = SphericalUtils.findNearestPlanet(boatPos, state.islands);
         if (result.planet && result.distance < result.planet.radius + 10) {
             const normal = SphericalUtils.getSurfaceNormal(boatPos, result.planet);
-            const surfacePos = result.planet.center.clone().add(normal.multiplyScalar(result.planet.radius + 2));
+            const surfacePos = result.planet.center.clone().add(
+                normal.multiplyScalar(result.planet.radius + 2)
+            );
             state.player.pos.copy(surfacePos);
         } else {
+            // Can't exit in deep space
             audio.pop();
             return;
         }
@@ -76,8 +102,12 @@ export default class BoatSystem {
         state.isOnBoat = false;
         state.boatSpeed = 0;
         state.player.vel.set(0, 0, 0);
+        state.shipVelocity.set(0, 0, 0);
+        state.shipQuaternion.identity();
+        state.shipCameraMode = 'chase';
         audio.pickup();
         this.showBoatHUD(false);
+
         if (playerController.playerGroup) {
             playerController.playerGroup.visible = true;
             this.resetSeatedPose(playerController);
@@ -89,16 +119,20 @@ export default class BoatSystem {
             state.catBoardingQueued = false;
             if (result.planet) {
                 const catNormal = SphericalUtils.getSurfaceNormal(boatPos, result.planet);
-                // Offset slightly from player
                 const tangent = SphericalUtils._getArbitraryTangent(catNormal);
                 const catPos = result.planet.center.clone().add(
-                    catNormal.clone().add(tangent.multiplyScalar(0.1)).normalize().multiplyScalar(result.planet.radius + 0.3)
+                    catNormal.clone().add(tangent.multiplyScalar(0.1))
+                        .normalize().multiplyScalar(result.planet.radius + 0.3)
                 );
                 playerCat.position.copy(catPos);
                 playerCat.userData.planet = result.planet;
             }
         }
     }
+
+    // ===========================================
+    // POSE
+    // ===========================================
 
     setSeatedPose(pc) {
         if (!pc.modelPivot) return;
@@ -125,27 +159,30 @@ export default class BoatSystem {
         if (statsPan) statsPan.style.display = show ? 'block' : 'none';
     }
 
+    // ===========================================
+    // BOARDING ANIMATION
+    // ===========================================
+
     updateBoardingAnimation(dt, context) {
-        const { state, playerController: pc } = context;
+        const { state, playerController: pc, camera } = context;
         if (!state.isBoardingBoat || !state.boardingTargetBoat) return;
 
         const boat = state.boardingTargetBoat;
         const player = state.player;
 
-        // Simplified boarding: lerp directly to boat position
+        // Linear lerp toward boat position
         state.boardingProgress += dt * BOARDING_WALK_SPEED;
         const t = Math.min(state.boardingProgress, 1);
-        const ease = t * (2 - t);
+        const ease = t * (2 - t); // ease-out
 
         player.pos.lerpVectors(state.boardingStartPos, boat.position, ease);
-
         if (pc.playerGroup) pc.playerGroup.position.copy(player.pos);
 
         if (t >= 1) {
             this.finishBoarding(context);
         }
 
-        // Camera follows (3D space)
+        // Camera follows during boarding
         const ca = player.cameraAngle;
         const camDist = 6.0;
         const camOffset = new THREE.Vector3(
@@ -154,8 +191,8 @@ export default class BoatSystem {
             camDist * Math.cos(ca.x) * Math.cos(ca.y)
         );
         const desiredPos = player.pos.clone().add(camOffset);
-        context.camera.position.lerp(desiredPos, 0.08);
-        context.camera.lookAt(player.pos);
+        camera.position.lerp(desiredPos, 0.08);
+        camera.lookAt(player.pos);
     }
 
     updateCatBoardingAnimation(dt, context) {
@@ -166,7 +203,6 @@ export default class BoatSystem {
 
         state.catBoardingProgress = (state.catBoardingProgress || 0) + dt * BOARDING_WALK_SPEED;
         const t = Math.min(state.catBoardingProgress, 1);
-
         cat.position.lerpVectors(state.catBoardingStartPos || cat.position, boat.position, t);
 
         if (t >= 1) {
@@ -175,77 +211,232 @@ export default class BoatSystem {
         }
     }
 
+    // ===========================================
+    // FLIGHT MODE DETECTION
+    // ===========================================
+
+    _updateFlightMode(state, boatPos) {
+        const result = SphericalUtils.findNearestPlanet(boatPos, state.islands);
+        if (!result || !result.planet) {
+            state.shipNearestPlanet = null;
+            state.shipFlightMode = 'space';
+            state.shipPlanetBlend = 1.0;
+            return;
+        }
+
+        state.shipNearestPlanet = result.planet;
+
+        const altitude = result.altitude; // distance from surface
+        const r = result.planet.radius;
+        const planetThreshold = r * SHIP_PLANET_MODE_RADIUS;
+        const spaceThreshold = r * SHIP_SPACE_MODE_RADIUS;
+
+        if (altitude < planetThreshold) {
+            state.shipFlightMode = 'planet';
+            state.shipPlanetBlend = 0.0;
+        } else if (altitude > spaceThreshold) {
+            state.shipFlightMode = 'space';
+            state.shipPlanetBlend = 1.0;
+        } else {
+            state.shipFlightMode = 'transition';
+            state.shipPlanetBlend = (altitude - planetThreshold) / (spaceThreshold - planetThreshold);
+        }
+    }
+
+    // ===========================================
+    // AUTO-LEVEL ROLL
+    // ===========================================
+
+    /**
+     * Remove roll from orientation by slerping toward an upright quaternion.
+     * In planet mode, "up" = surface normal.
+     * In space mode, "up" = ship's current Y axis (no correction).
+     * In transition, blend between them.
+     */
+    _autoLevelRoll(state, dt) {
+        const q = state.shipQuaternion;
+
+        // No roll correction in deep space
+        if (state.shipFlightMode === 'space') return;
+        if (!state.shipNearestPlanet) return;
+
+        const boat = state.activeBoat;
+        const desiredUp = SphericalUtils.getSurfaceNormal(boat.position, state.shipNearestPlanet);
+
+        // Current ship axes
+        const shipForward = _tmpVec.set(0, 0, -1).applyQuaternion(q).normalize();
+        const shipUp = _tmpVec2.set(0, 1, 0).applyQuaternion(q).normalize();
+
+        // Project desired up onto the plane perpendicular to ship forward
+        const projUp = _tmpVec3.copy(desiredUp)
+            .addScaledVector(shipForward, -desiredUp.dot(shipForward))
+            .normalize();
+
+        if (projUp.lengthSq() < 0.001) return; // degenerate case
+
+        // Compute rotation from current shipUp to projUp around shipForward
+        const dot = Math.max(-1, Math.min(1, shipUp.dot(projUp)));
+        const angle = Math.acos(dot);
+        if (angle < 0.001) return; // already level
+
+        const cross = shipUp.clone().cross(projUp);
+        const sign = cross.dot(shipForward) > 0 ? 1 : -1;
+
+        // Correction strength scales with planet blend (stronger in planet mode)
+        const correctionAngle = sign * Math.min(angle, SHIP_AUTO_LEVEL_SPEED * (1.0 - state.shipPlanetBlend * 0.8));
+        _tmpQuat.setFromAxisAngle(shipForward, correctionAngle);
+        q.premultiply(_tmpQuat).normalize();
+    }
+
+    // ===========================================
+    // PITCH CLAMPING (planet mode)
+    // ===========================================
+
+    _clampPitchInPlanetMode(state) {
+        if (state.shipFlightMode === 'space') return;
+        if (!state.shipNearestPlanet) return;
+
+        const q = state.shipQuaternion;
+        const boat = state.activeBoat;
+        const normal = SphericalUtils.getSurfaceNormal(boat.position, state.shipNearestPlanet);
+
+        // Ship forward
+        const shipForward = _tmpVec.set(0, 0, -1).applyQuaternion(q).normalize();
+
+        // Angle between forward and tangent plane
+        const dotUp = shipForward.dot(normal);
+        const pitchAngle = Math.asin(Math.max(-1, Math.min(1, dotUp)));
+
+        const maxPitch = SHIP_MAX_PLANET_PITCH * (1.0 - state.shipPlanetBlend * 0.5);
+
+        if (Math.abs(pitchAngle) > maxPitch) {
+            const excess = pitchAngle - Math.sign(pitchAngle) * maxPitch;
+            const shipRight = _tmpVec2.set(1, 0, 0).applyQuaternion(q).normalize();
+            _tmpQuat.setFromAxisAngle(shipRight, -excess * 0.3);
+            q.premultiply(_tmpQuat).normalize();
+        }
+    }
+
+    // ===========================================
+    // MAIN PHYSICS UPDATE
+    // ===========================================
+
     updateBoatPhysics(dt, context) {
         const { state, audio, factory, playerController: pc, playerCat, camera } = context;
         const boat = state.activeBoat;
         if (!boat) return;
 
-        const defaults = {
-            currentSpeed: state.boatSpeed || 0,
-            maxSpeed: BOAT_BASE_MAX_SPEED,
-            acceleration: BOAT_BASE_ACCELERATION,
-            turnSpeed: BOAT_BASE_TURN_SPEED,
-            brake: BOAT_BASE_BRAKE,
-            drag: BOAT_BASE_DRAG,
-            maxHealth: BOAT_BASE_HEALTH,
-            health: BOAT_BASE_HEALTH
-        };
-
+        // --- Ensure stats exist ---
         if (!boat.userData.stats) {
-            boat.userData.stats = { ...defaults };
-        } else {
-            for (const key in defaults) {
-                if (boat.userData.stats[key] === undefined) {
-                    boat.userData.stats[key] = defaults[key];
-                }
-            }
+            boat.userData.stats = {
+                currentSpeed: 0,
+                maxSpeed: SHIP_MAX_SPEED,
+                acceleration: SHIP_ACCELERATION,
+                turnSpeed: SHIP_TURN_SPEED,
+                brake: SHIP_BRAKE,
+                drag: SHIP_DRAG,
+                maxHealth: SHIP_HEALTH,
+                health: SHIP_HEALTH
+            };
         }
         const stats = boat.userData.stats;
-
         if (isNaN(stats.currentSpeed)) stats.currentSpeed = 0;
-        if (isNaN(stats.maxSpeed) || stats.maxSpeed <= 0) stats.maxSpeed = BOAT_BASE_MAX_SPEED;
+        if (isNaN(stats.maxSpeed) || stats.maxSpeed <= 0) stats.maxSpeed = SHIP_MAX_SPEED;
 
-        state.boatSpeed = stats.currentSpeed;
+        // --- Flight mode detection ---
+        this._updateFlightMode(state, boat.position);
 
-        // 3D spaceship flight
+        // --- Orientation: yaw + pitch via quaternion ---
+        const q = state.shipQuaternion;
         const speedRatio = Math.min(Math.abs(stats.currentSpeed) / stats.maxSpeed, 1);
-        const turnRate = stats.turnSpeed * (0.3 + speedRatio * 0.7);
 
-        if (state.inputs.a) state.boatRotation = (state.boatRotation || 0) + turnRate;
-        if (state.inputs.d) state.boatRotation = (state.boatRotation || 0) - turnRate;
+        // Yaw (A/D) — rotate around ship's local Y-axis
+        if (state.inputs.a || state.inputs.d) {
+            const yawRate = SHIP_YAW_SPEED * (0.3 + speedRatio * 0.7);
+            const yawDelta = state.inputs.a ? yawRate : -yawRate;
+            const shipUp = _tmpVec.set(0, 1, 0).applyQuaternion(q).normalize();
+            _tmpQuat.setFromAxisAngle(shipUp, yawDelta);
+            q.premultiply(_tmpQuat).normalize();
+        }
+
+        // Pitch (Space = pitch up, Shift = pitch down — while on ship)
+        const pitchInput = (state.inputs.pitchUp || (state.isOnBoat && state.inputs.space))
+            ? 1 : (state.inputs.pitchDown || (state.isOnBoat && state.inputs.shift))
+            ? -1 : 0;
+
+        if (pitchInput !== 0) {
+            const shipRight = _tmpVec.set(1, 0, 0).applyQuaternion(q).normalize();
+            _tmpQuat.setFromAxisAngle(shipRight, pitchInput * SHIP_PITCH_SPEED);
+            q.premultiply(_tmpQuat).normalize();
+        }
+
+        // Auto-level roll
+        this._autoLevelRoll(state, dt);
+
+        // Clamp pitch near planets
+        this._clampPitchInPlanetMode(state);
+
+        // --- Thrust: W = forward accel, S = brake/reverse ---
+        const shipForward = _tmpVec.set(0, 0, -1).applyQuaternion(q).normalize();
 
         if (state.inputs.w) {
-            stats.currentSpeed = Math.min(stats.currentSpeed + stats.acceleration, stats.maxSpeed);
+            stats.currentSpeed = Math.min(
+                stats.currentSpeed + stats.acceleration,
+                stats.maxSpeed
+            );
         } else if (state.inputs.s) {
-            stats.currentSpeed = Math.max(stats.currentSpeed - stats.brake, -stats.maxSpeed * BOAT_REVERSE_FACTOR);
+            stats.currentSpeed = Math.max(
+                stats.currentSpeed - stats.brake,
+                -stats.maxSpeed * SHIP_REVERSE_FACTOR
+            );
         } else {
             stats.currentSpeed *= stats.drag;
-            if (Math.abs(stats.currentSpeed) < BOAT_MIN_SPEED) stats.currentSpeed = 0;
+            if (Math.abs(stats.currentSpeed) < SHIP_MIN_SPEED) stats.currentSpeed = 0;
+        }
+
+        // Build velocity vector from speed + forward direction
+        state.shipVelocity.copy(shipForward).multiplyScalar(stats.currentSpeed);
+
+        // --- Gravity from nearby planets ---
+        for (const planet of state.islands) {
+            const toPlanet = _tmpVec2.copy(planet.center).sub(boat.position);
+            const dist = toPlanet.length();
+            const maxRange = planet.radius * SHIP_GRAVITY_RANGE;
+            if (dist > maxRange || dist < 0.1) continue;
+
+            // Inverse-square gravity: F = strength × (r² / d²)
+            const force = SHIP_GRAVITY_STRENGTH * (planet.radius * planet.radius) / (dist * dist);
+            toPlanet.normalize().multiplyScalar(force);
+            state.shipVelocity.add(toPlanet);
         }
 
         state.boatSpeed = stats.currentSpeed;
 
-        // Update UI
-        const speedVal = document.getElementById('boat-speed-val');
-        const healthVal = document.getElementById('boat-health-val');
-        if (speedVal) speedVal.textContent = (Math.abs(stats.currentSpeed) * 100).toFixed(1);
-        if (healthVal) healthVal.textContent = Math.ceil(stats.health);
-
-        // Move in 3D space
-        const forward = new THREE.Vector3(-Math.sin(state.boatRotation || 0), 0, -Math.cos(state.boatRotation || 0));
-        const newPos = boat.position.clone().add(forward.multiplyScalar(state.boatSpeed));
+        // --- Position update ---
+        const newPos = _tmpVec3.copy(boat.position).add(state.shipVelocity);
 
         // Planet collision
         let blocked = false;
         for (const planet of state.islands) {
             const dist = newPos.distanceTo(planet.center);
-            const minDist = planet.radius + BOAT_COLLISION_RADIUS;
+            const minDist = planet.radius + SHIP_COLLISION_RADIUS;
             if (dist < minDist) {
-                const normal = newPos.clone().sub(planet.center).normalize();
-                boat.position.copy(planet.center.clone().add(normal.multiplyScalar(minDist)));
+                // Push out to minimum distance
+                const normal = _tmpVec.copy(newPos).sub(planet.center).normalize();
+                boat.position.copy(planet.center).addScaledVector(normal, minDist);
+
+                // Reflect velocity off collision normal
+                const velDotNorm = state.shipVelocity.dot(normal);
+                if (velDotNorm < 0) {
+                    state.shipVelocity.addScaledVector(normal, -velDotNorm * 1.15);
+                    state.shipVelocity.multiplyScalar(0.15); // heavy damping on bounce
+                }
+
+                stats.currentSpeed = state.shipVelocity.length() *
+                    Math.sign(shipForward.dot(state.shipVelocity) || 1);
+
                 if (Math.abs(state.boatSpeed) > 0.02) audio.pop();
-                state.boatSpeed *= -0.15;
-                stats.currentSpeed = state.boatSpeed;
+                state.boatSpeed = stats.currentSpeed;
                 blocked = true;
                 break;
             }
@@ -254,45 +445,149 @@ export default class BoatSystem {
         if (!blocked) {
             boat.position.copy(newPos);
         }
-        boat.rotation.y = state.boatRotation || 0;
 
-        // Player on boat (in 3D space, offset upward from boat)
-        const boatUp = new THREE.Vector3(0, 1, 0); // Boat uses world Y-up in space
-        state.player.pos.copy(boat.position).add(boatUp.clone().multiplyScalar(0.6));
+        // Apply quaternion to mesh
+        boat.quaternion.copy(q);
+
+        // --- HUD ---
+        const speedVal = document.getElementById('boat-speed-val');
+        const healthVal = document.getElementById('boat-health-val');
+        const modeEl = document.getElementById('ship-flight-mode');
+        const altEl = document.getElementById('ship-altitude');
+        if (speedVal) speedVal.textContent = (Math.abs(stats.currentSpeed) * 100).toFixed(1);
+        if (healthVal) healthVal.textContent = Math.ceil(stats.health);
+        if (modeEl) {
+            const modeLabels = { planet: 'PLANET', transition: 'TRANSIT', space: 'SPACE' };
+            modeEl.textContent = modeLabels[state.shipFlightMode] || 'SPACE';
+        }
+        if (altEl && state.shipNearestPlanet) {
+            const alt = SphericalUtils.getAltitude(boat.position, state.shipNearestPlanet);
+            altEl.textContent = alt.toFixed(1);
+        }
+
+        // --- Player on ship (local-space offset) ---
+        this._positionPlayerOnShip(state, pc, boat);
+
+        // --- Cat on ship ---
+        if (playerCat && state.catOnBoat) {
+            const catLocal = new THREE.Vector3(0.3, SHIP_DECK_Y_OFFSET + 0.3, 0.5);
+            catLocal.applyQuaternion(q);
+            playerCat.position.copy(boat.position).add(catLocal);
+            playerCat.quaternion.copy(q);
+        }
+
+        // --- Camera ---
+        this._updateCamera(state, boat, camera, pc);
+
+        // --- Thruster particles ---
+        this._emitThrusterParticles(state, boat, factory, q);
+    }
+
+    // ===========================================
+    // PLAYER POSITIONING ON SHIP
+    // ===========================================
+
+    _positionPlayerOnShip(state, pc, boat) {
+        const q = state.shipQuaternion;
+
+        // Player position: ship local (0, offset, 0) → world
+        const playerLocal = _tmpVec.set(0, SHIP_PLAYER_Y_OFFSET + 0.5, 0);
+        playerLocal.applyQuaternion(q);
+        state.player.pos.copy(boat.position).add(playerLocal);
 
         if (pc.playerGroup) {
-            pc.playerGroup.position.copy(boat.position);
-            pc.playerGroup.position.add(boatUp.clone().multiplyScalar(BOAT_PLAYER_Y_OFFSET));
-        }
-
-        // Cat on boat
-        if (playerCat && state.catOnBoat) {
-            playerCat.position.copy(boat.position);
-            playerCat.position.add(boatUp.clone().multiplyScalar(BOAT_DECK_Y_OFFSET));
-        }
-
-        // Camera (3D space)
-        const ca = state.player.cameraAngle;
-        ca.y = Math.max(0.1, Math.min(1.4, ca.y));
-        const camDist = 8.0;
-        const camOffset = new THREE.Vector3(
-            camDist * Math.sin(ca.x) * Math.cos(ca.y),
-            camDist * Math.sin(ca.y) + 1.5,
-            camDist * Math.cos(ca.x) * Math.cos(ca.y)
-        );
-        const desiredPos = boat.position.clone().add(camOffset);
-
-        if (!isNaN(desiredPos.x) && !isNaN(desiredPos.y) && !isNaN(desiredPos.z)) {
-            camera.position.lerp(desiredPos, 0.08);
-            camera.lookAt(boat.position);
-        }
-
-        // Thruster particles instead of wake
-        if (Math.abs(state.boatSpeed) > 0.02 && Math.random() < 0.3) {
-            const thrustPos = boat.position.clone().sub(forward.clone().multiplyScalar(2.5));
-            factory.createParticle(thrustPos, new THREE.Color(0x4488ff), 0.7);
+            pc.playerGroup.position.copy(state.player.pos);
+            // Orient player group to match ship orientation
+            pc.playerGroup.quaternion.copy(q);
         }
     }
+
+    // ===========================================
+    // CAMERA (CHASE + COCKPIT)
+    // ===========================================
+
+    _updateCamera(state, boat, camera, pc) {
+        const q = state.shipQuaternion;
+        const ca = state.player.cameraAngle;
+
+        if (state.shipCameraMode === 'cockpit') {
+            // --- COCKPIT VIEW ---
+            // Position inside cockpit dome (local 0, 0.5, -0.8)
+            const cockpitLocal = new THREE.Vector3(0, 0.5, -0.8);
+            cockpitLocal.applyQuaternion(q);
+            const cockpitPos = boat.position.clone().add(cockpitLocal);
+
+            // Look forward along ship direction
+            const shipForward = _tmpVec.set(0, 0, -1).applyQuaternion(q).normalize();
+            const lookTarget = cockpitPos.clone().addScaledVector(shipForward, 10);
+
+            camera.position.lerp(cockpitPos, 0.15);
+            camera.lookAt(lookTarget);
+
+            // Hide player model in cockpit
+            if (pc.playerGroup) pc.playerGroup.visible = false;
+        } else {
+            // --- CHASE CAM ---
+            if (pc.playerGroup) pc.playerGroup.visible = true;
+
+            // Ship's back direction and up
+            const shipBack = _tmpVec.set(0, 0, 1).applyQuaternion(q).normalize();
+            const shipUp = _tmpVec2.set(0, 1, 0).applyQuaternion(q).normalize();
+
+            const camDist = CAMERA_DISTANCE_BOAT || 8.0;
+
+            // Mouse orbit offset
+            const orbitH = ca.x;
+            const orbitV = Math.max(0.1, Math.min(1.4, ca.y));
+            ca.y = orbitV;
+
+            // Orbit: rotate the "back" direction by horizontal angle around ship up
+            const orbBack = shipBack.clone();
+            _tmpQuat2.setFromAxisAngle(shipUp, orbitH);
+            orbBack.applyQuaternion(_tmpQuat2);
+
+            // Add vertical elevation
+            const desiredPos = boat.position.clone()
+                .addScaledVector(orbBack, camDist * Math.cos(orbitV))
+                .addScaledVector(shipUp, camDist * Math.sin(orbitV) + 1.5);
+
+            if (!isNaN(desiredPos.x) && !isNaN(desiredPos.y) && !isNaN(desiredPos.z)) {
+                camera.position.lerp(desiredPos, 0.08);
+                camera.lookAt(boat.position);
+            }
+        }
+    }
+
+    // ===========================================
+    // THRUSTER PARTICLES
+    // ===========================================
+
+    _emitThrusterParticles(state, boat, factory, q) {
+        if (Math.abs(state.boatSpeed) < 0.02) return;
+
+        // Emit rate scales with speed
+        const emitChance = Math.min(0.6, 0.2 + Math.abs(state.boatSpeed) * 2);
+        if (Math.random() > emitChance) return;
+
+        // Engine nozzle positions (local space): ±0.5 X, z = 2.35
+        const side = Math.random() > 0.5 ? 0.5 : -0.5;
+        const nozzleLocal = new THREE.Vector3(side, 0, 2.35);
+        nozzleLocal.applyQuaternion(q);
+        const thrustPos = boat.position.clone().add(nozzleLocal);
+
+        // Color: blue at cruise, brighter near max speed
+        const speedRatio = Math.abs(state.boatSpeed) / SHIP_MAX_SPEED;
+        const r = 0.27 + speedRatio * 0.73;
+        const g = 0.53 + speedRatio * 0.47;
+        const b = 1.0;
+        const color = new THREE.Color(r, g, b);
+
+        factory.createParticle(thrustPos, color, 0.7);
+    }
+
+    // ===========================================
+    // PROXIMITY DETECTION (when walking)
+    // ===========================================
 
     updateProximity(context) {
         const { state } = context;
@@ -303,7 +598,7 @@ export default class BoatSystem {
         state.entities.forEach(e => {
             if (e.userData.type === 'boat' || e.userData.type === 'spaceship') {
                 const d = state.player.pos.distanceTo(e.position);
-                if (d < BOAT_PROXIMITY_RANGE && d < nearBoatDist) {
+                if (d < SHIP_PROXIMITY_RANGE && d < nearBoatDist) {
                     nearBoat = e;
                     nearBoatDist = d;
                 }
@@ -320,6 +615,10 @@ export default class BoatSystem {
         this._nearestBoat = nearBoat;
     }
 
+    // ===========================================
+    // MAIN UPDATE
+    // ===========================================
+
     update(dt, context) {
         const { state } = context;
 
@@ -327,6 +626,7 @@ export default class BoatSystem {
             this.updateBoardingAnimation(dt, context);
         }
 
+        // Cat boarding delay
         if (state.catBoardingQueued) {
             state.catBoardingDelay -= dt;
             if (state.catBoardingDelay <= 0) {

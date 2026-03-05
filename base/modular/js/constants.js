@@ -53,28 +53,30 @@ export const SHIP_DECK_Y_OFFSET = 0.0;
 export const SHIP_PLAYER_Y_OFFSET = 0.1;
 export const SHIP_PITCH_SPEED = 0.015;
 export const SHIP_YAW_SPEED = 0.02;
+export const SHIP_HEALTH = 100;
+export const SHIP_TURN_SPEED = 0.02;
 
-// Boat (legacy, kept for BoatSystem compatibility)
-export const BOAT_MAX_SPEED = 0.12;
-export const BOAT_ACCELERATION = 0.003;
-export const BOAT_BRAKE = 0.004;
-export const BOAT_REVERSE_FACTOR = 0.3;
-export const BOAT_DRAG = 0.985;
-export const BOAT_MIN_SPEED = 0.001;
-export const BOAT_COLLISION_RADIUS = 3.0;
-export const BOAT_PROXIMITY_RANGE = 6.0;
-export const BOAT_LOG_CLUSTER_SIZE = 4;
-export const BOAT_LOG_CLUSTER_RADIUS = 5.0;
-export const BOAT_DECK_Y_OFFSET = -1.30;
-export const BOAT_PLAYER_Y_OFFSET = -1.20;
+// Spaceship gravity & flight modes
+export const SHIP_GRAVITY_STRENGTH = 0.002;    // gravity pull at reference distance
+export const SHIP_GRAVITY_RANGE = 4.0;         // max range as multiplier of planet radius
+export const SHIP_PLANET_MODE_RADIUS = 2.5;    // proximity multiplier: inside = planet mode
+export const SHIP_SPACE_MODE_RADIUS = 4.0;     // outside = full space mode
+export const SHIP_AUTO_LEVEL_SPEED = 0.03;     // roll auto-correction rate
+export const SHIP_MAX_PLANET_PITCH = Math.PI / 4; // max pitch in planet mode (45°)
 
-// Boat Base Stats (Dynamic System)
-export const BOAT_BASE_HEALTH = 100;
-export const BOAT_BASE_MAX_SPEED = 0.12;
-export const BOAT_BASE_ACCELERATION = 0.003;
-export const BOAT_BASE_TURN_SPEED = 0.02;
-export const BOAT_BASE_DRAG = 0.985;
-export const BOAT_BASE_BRAKE = 0.004;
+// Legacy aliases for BoatSystem compatibility (map to SHIP_*)
+export const BOAT_BASE_HEALTH = SHIP_HEALTH;
+export const BOAT_BASE_MAX_SPEED = SHIP_MAX_SPEED;
+export const BOAT_BASE_ACCELERATION = SHIP_ACCELERATION;
+export const BOAT_BASE_TURN_SPEED = SHIP_TURN_SPEED;
+export const BOAT_BASE_DRAG = SHIP_DRAG;
+export const BOAT_BASE_BRAKE = SHIP_BRAKE;
+export const BOAT_REVERSE_FACTOR = SHIP_REVERSE_FACTOR;
+export const BOAT_MIN_SPEED = SHIP_MIN_SPEED;
+export const BOAT_COLLISION_RADIUS = SHIP_COLLISION_RADIUS;
+export const BOAT_PROXIMITY_RANGE = SHIP_PROXIMITY_RANGE;
+export const BOAT_DECK_Y_OFFSET = SHIP_DECK_Y_OFFSET;
+export const BOAT_PLAYER_Y_OFFSET = SHIP_PLAYER_Y_OFFSET;
 
 // Boarding animation
 export const BOARDING_WALK_SPEED = 2.5;

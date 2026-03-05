@@ -85,7 +85,20 @@ export default class NetworkManager {
             },
             rotation: state.player.targetRotation || 0,
             isOnBoat: state.isOnBoat,
-            activeAction: state.isChopping ? 'chop' : state.isMining ? 'mine' : null
+            activeAction: state.isChopping ? 'chop' : state.isMining ? 'mine' : null,
+            // Ship 3D state for remote rendering
+            shipPosition: state.isOnBoat && state.activeBoat ? {
+                x: state.activeBoat.position.x,
+                y: state.activeBoat.position.y,
+                z: state.activeBoat.position.z
+            } : null,
+            shipQuaternion: state.isOnBoat ? {
+                x: state.shipQuaternion.x,
+                y: state.shipQuaternion.y,
+                z: state.shipQuaternion.z,
+                w: state.shipQuaternion.w
+            } : null,
+            shipSpeed: state.isOnBoat ? state.boatSpeed : 0
         }));
     }
 
@@ -160,6 +173,9 @@ export default class NetworkManager {
                     remote.rotation = msg.rotation;
                     remote.isOnBoat = msg.isOnBoat;
                     remote.activeAction = msg.activeAction;
+                    remote.shipPosition = msg.shipPosition;
+                    remote.shipQuaternion = msg.shipQuaternion;
+                    remote.shipSpeed = msg.shipSpeed;
                 }
                 if (this.onPlayerUpdate) this.onPlayerUpdate(msg.id, msg);
                 break;
