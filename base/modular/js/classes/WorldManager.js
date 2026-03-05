@@ -1,6 +1,8 @@
 // =====================================================
-// POCKET TERRARIUM - WORLD MANAGER CLASS
+// WORLD MANAGER - Space Environment
 // =====================================================
+
+import { STAR_COUNT, STAR_SPREAD } from '../constants.js';
 
 export default class WorldManager {
     constructor(renderScale) {
@@ -11,16 +13,75 @@ export default class WorldManager {
         this.renderer.setSize(window.innerWidth * renderScale, window.innerHeight * renderScale, false);
         this.renderer.domElement.style.imageRendering = 'pixelated';
         document.body.appendChild(this.renderer.domElement);
-        this.scene.background = new THREE.Color(0x050510);
+        this.scene.background = new THREE.Color(0x020208);
         this.setupLighting();
+        this.createStarfield();
     }
 
     setupLighting() {
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        // Ambient - dimmer for space
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
         this.scene.add(ambientLight);
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        dirLight.position.set(5, 10, 5);
-        this.scene.add(dirLight);
+
+        // Distant sun (directional)
+        const sunLight = new THREE.DirectionalLight(0xffffee, 1.0);
+        sunLight.position.set(200, 100, 50);
+        this.scene.add(sunLight);
+
+        // Secondary fill light from opposite side
+        const fillLight = new THREE.DirectionalLight(0x4466aa, 0.3);
+        fillLight.position.set(-100, -50, -80);
+        this.scene.add(fillLight);
+    }
+
+    createStarfield() {
+        const starGeo = new THREE.BufferGeometry();
+        const positions = new Float32Array(STAR_COUNT * 3);
+        const colors = new Float32Array(STAR_COUNT * 3);
+
+        for (let i = 0; i < STAR_COUNT; i++) {
+            const i3 = i * 3;
+            // Random point on a large sphere shell
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const r = STAR_SPREAD + Math.random() * 200;
+            positions[i3] = r * Math.sin(phi) * Math.cos(theta);
+            positions[i3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+            positions[i3 + 2] = r * Math.cos(phi);
+
+            // Slightly varied star colors (white/blue/yellow)
+            const colorRoll = Math.random();
+            if (colorRoll < 0.7) {
+                // White
+                colors[i3] = 0.9 + Math.random() * 0.1;
+                colors[i3 + 1] = 0.9 + Math.random() * 0.1;
+                colors[i3 + 2] = 0.9 + Math.random() * 0.1;
+            } else if (colorRoll < 0.85) {
+                // Blue-white
+                colors[i3] = 0.6 + Math.random() * 0.2;
+                colors[i3 + 1] = 0.7 + Math.random() * 0.2;
+                colors[i3 + 2] = 1.0;
+            } else {
+                // Warm yellow
+                colors[i3] = 1.0;
+                colors[i3 + 1] = 0.9 + Math.random() * 0.1;
+                colors[i3 + 2] = 0.5 + Math.random() * 0.3;
+            }
+        }
+
+        starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        starGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const starMat = new THREE.PointsMaterial({
+            size: 1.5,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.8,
+            sizeAttenuation: true
+        });
+
+        this.stars = new THREE.Points(starGeo, starMat);
+        this.scene.add(this.stars);
     }
 
     add(obj) { this.scene.add(obj); }

@@ -1,8 +1,9 @@
 // =====================================================
-// MINE SYSTEM - Rock/Gold mining mechanics
+// MINE SYSTEM - Rock/Gold mining mechanics (spherical)
 // =====================================================
 
 import { MINE_HITS, HIT_INTERVAL, CHOP_MAX_RANGE, MINE_DROP_COUNT } from '../constants.js';
+import SphericalUtils from '../classes/SphericalUtils.js';
 
 export default class MineSystem {
     constructor(ui) {
@@ -15,9 +16,8 @@ export default class MineSystem {
         if (!state.isMining || !state.interactionTarget) return;
 
         const rock = state.interactionTarget;
-        const dx = rock.position.x - state.player.pos.x;
-        const dz = rock.position.z - state.player.pos.z;
-        if (Math.sqrt(dx * dx + dz * dz) > CHOP_MAX_RANGE) {
+        const mineDist = rock.position.distanceTo(state.player.pos);
+        if (mineDist > CHOP_MAX_RANGE) {
             state.isMining = false;
             state.mineProgress = 0;
             return;
@@ -39,11 +39,15 @@ export default class MineSystem {
             state.mineProgress++;
             audio.chop();
 
-            // Rock shake
-            const shakeX = (Math.random() - 0.5) * 0.15;
-            const origX = rock.position.x;
-            rock.position.x += shakeX;
-            setTimeout(() => { if (rock.parent) rock.position.x = origX; }, 100);
+            // Rock shake (along tangent direction)
+            const planet = rock.userData.planet;
+            if (planet) {
+                const normal = SphericalUtils.getSurfaceNormal(rock.position, planet);
+                const tangent = SphericalUtils._getArbitraryTangent(normal);
+                const origPos = rock.position.clone();
+                rock.position.add(tangent.multiplyScalar((Math.random() - 0.5) * 0.15));
+                setTimeout(() => { if (rock.parent) rock.position.copy(origPos); }, 100);
+            }
 
             factory.createChopParticles(rock.position.clone(), rock.userData.color || new THREE.Color(0x888888));
 
@@ -61,10 +65,17 @@ export default class MineSystem {
                         world.getMat(dropColor)
                     );
                     drop.userData = { type: 'rock', color: dropColor, autoPickup: true };
-                    drop.position.copy(rock.position);
-                    drop.position.y += 0.5;
-                    drop.position.x += (Math.random() - 0.5) * 0.8;
-                    drop.position.z += (Math.random() - 0.5) * 0.8;
+
+                    // Place drops on planet surface near the mined rock
+                    const rockPlanet = rock.userData.planet;
+                    if (rockPlanet) {
+                        const dropPos = SphericalUtils.randomSurfacePointNear(rockPlanet, rock.position, 0.2, 0.8);
+                        const normal = SphericalUtils.getSurfaceNormal(dropPos, rockPlanet);
+                        drop.position.copy(rockPlanet.center.clone().add(normal.multiplyScalar(rockPlanet.radius + 0.15)));
+                        drop.userData.planet = rockPlanet;
+                    } else {
+                        drop.position.copy(rock.position);
+                    }
                     world.add(drop);
                     state.entities.push(drop);
                 }

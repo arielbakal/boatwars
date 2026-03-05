@@ -1,17 +1,18 @@
 // =====================================================
-// ENTITY FACTORY CLASS
+// ENTITY FACTORY CLASS - Space World Version
 // =====================================================
 
 import {
     BOAT_BASE_HEALTH, BOAT_BASE_MAX_SPEED, BOAT_BASE_ACCELERATION,
     BOAT_BASE_TURN_SPEED, BOAT_BASE_DRAG, BOAT_BASE_BRAKE
 } from '../constants.js';
+import SphericalUtils from './SphericalUtils.js';
 
 export default class EntityFactory {
     constructor(world, state) {
         this.world = world;
         this.state = state;
-        this.O_Y = -1.4;
+        this.O_Y = -1.4; // Legacy reference
     }
 
     getMat(color, flat = true) { return this.world.getMat(color, flat); }
@@ -58,15 +59,6 @@ export default class EntityFactory {
         };
     }
 
-    generateTerrain(r, s, min, max) {
-        const geo = new THREE.CircleGeometry(r, s);
-        const pos = geo.attributes.position;
-        for (let i = 1; i < pos.count; i++) pos.setZ(i, pos.getZ(i) + (Math.random() - 0.5) * (max - min));
-        pos.setZ(pos.count - 1, pos.getZ(1));
-        geo.computeVertexNormals();
-        return geo;
-    }
-
     createBubbleTexture(char, color) {
         const canvas = document.createElement('canvas');
         canvas.width = 64; canvas.height = 64;
@@ -109,6 +101,94 @@ export default class EntityFactory {
         return geometry;
     }
 
+    /**
+     * Orient an entity on a planet surface so its local Y points outward.
+     * @param {THREE.Object3D} obj - The object to orient
+     * @param {THREE.Vector3} surfacePos - Position on the planet surface
+     * @param {Object} planet - { center: THREE.Vector3, radius: number }
+     * @param {number} heightOffset - Height above surface
+     */
+    orientOnPlanet(obj, surfacePos, planet, heightOffset = 0) {
+        const normal = SphericalUtils.getSurfaceNormal(surfacePos, planet);
+        const pos = planet.center.clone().add(normal.clone().multiplyScalar(planet.radius + heightOffset));
+        obj.position.copy(pos);
+        const q = SphericalUtils.getOrientationOnSurface(normal);
+        obj.quaternion.copy(q);
+    }
+
+    // =====================================================
+    // PLANET CREATION (replaces createIslandAt)
+    // =====================================================
+
+    /**
+     * Create a spherical planet with layered terrain.
+     * @param {Object} palette - Color palette
+     * @param {number} cx - Center X
+     * @param {number} cy - Center Y
+     * @param {number} cz - Center Z
+     * @param {number} radius - Planet radius
+     * @param {boolean} hasAtmosphere - Whether to render atmosphere glow
+     * @returns {{ group, groundMesh, center, radius }}
+     */
+    createPlanet(palette, cx, cy, cz, radius, hasAtmosphere = false) {
+        const g = new THREE.Group();
+        const detail = Math.max(2, Math.min(4, Math.floor(radius / 5)));
+
+        // Core rock layer
+        const coreGeo = new THREE.IcosahedronGeometry(radius * 0.95, detail);
+        this.distortGeometry(coreGeo, radius * 0.03);
+        const core = new THREE.Mesh(coreGeo, this.getMat(palette.baseRock));
+        g.add(core);
+
+        // Soil layer
+        const soilGeo = new THREE.IcosahedronGeometry(radius * 0.98, detail);
+        this.distortGeometry(soilGeo, radius * 0.02);
+        const soil = new THREE.Mesh(soilGeo, this.getMat(palette.soil));
+        g.add(soil);
+
+        // Surface (grass) layer - the main collision surface
+        const surfaceGeo = new THREE.IcosahedronGeometry(radius, detail);
+        this.distortGeometry(surfaceGeo, radius * 0.015);
+        const surface = new THREE.Mesh(surfaceGeo, this.getMat(palette.groundTop));
+        surface.userData = { type: 'ground' };
+        g.add(surface);
+
+        // Atmosphere glow
+        if (hasAtmosphere) {
+            const atmosGeo = new THREE.IcosahedronGeometry(radius * 1.08, detail);
+            const atmosMat = new THREE.MeshBasicMaterial({
+                color: palette.background.clone().lerp(new THREE.Color(0x4488ff), 0.5),
+                transparent: true,
+                opacity: 0.12,
+                side: THREE.BackSide
+            });
+            const atmos = new THREE.Mesh(atmosGeo, atmosMat);
+            g.add(atmos);
+        }
+
+        g.position.set(cx, cy, cz);
+
+        return {
+            group: g,
+            groundMesh: surface,
+            center: new THREE.Vector3(cx, cy, cz),
+            radius: radius
+        };
+    }
+
+    // Legacy wrapper
+    createIslandAt(palette, centerX, centerZ, radius, hasWater = false) {
+        return this.createPlanet(palette, centerX, 0, centerZ, radius, hasWater);
+    }
+
+    createIsland(palette) {
+        return this.createPlanet(palette, 0, 0, 0, 7, true);
+    }
+
+    // =====================================================
+    // ENTITY CREATION (adapted for spherical orientation)
+    // =====================================================
+
     createStoneGolem(p, x, z) {
         const g = new THREE.Group();
         const stoneMat = this.getMat(0x78909c);
@@ -116,24 +196,20 @@ export default class EntityFactory {
         const eyeWhiteMat = this.getMat(0xffffff);
         const eyePupilMat = this.getMat(0x111111);
 
-        // A. Body - Simple Box
         const bodyGeo = new THREE.BoxGeometry(2.5, 3.2, 1.8);
         const body = new THREE.Mesh(bodyGeo, stoneMat);
         g.add(body);
 
-        // B. Nose
         const noseGeo = new THREE.BoxGeometry(0.8, 1.4, 0.5);
         const nose = new THREE.Mesh(noseGeo, stoneMat);
         nose.position.set(0, 0.2, 1.0);
         g.add(nose);
 
-        // C. Mouth
         const mouthGeo = new THREE.BoxGeometry(1.6, 0.15, 0.2);
         const mouth = new THREE.Mesh(mouthGeo, darkStoneMat);
         mouth.position.set(0, -0.9, 0.9);
         g.add(mouth);
 
-        // D. Eyes
         const createEye = (xDir) => {
             const eyeGroup = new THREE.Group();
             const whiteGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.2, 8);
@@ -155,7 +231,6 @@ export default class EntityFactory {
         };
         g.add(createEye(-1), createEye(1));
 
-        // E. Arms
         const createArm = (xDir) => {
             const armGeo = new THREE.BoxGeometry(0.6, 2.2, 0.8);
             const arm = new THREE.Mesh(armGeo, stoneMat);
@@ -169,7 +244,6 @@ export default class EntityFactory {
         const rArm = createArm(1);
         g.add(lArm, rArm);
 
-        // F. Legs
         const createLeg = (lx, lz) => {
             const legGeo = new THREE.BoxGeometry(0.6, 0.8, 0.6);
             const leg = new THREE.Mesh(legGeo, stoneMat);
@@ -179,13 +253,15 @@ export default class EntityFactory {
         };
         const legs = [createLeg(-0.8, 0.5), createLeg(0.8, 0.5), createLeg(-0.8, -0.5), createLeg(0.8, -0.5)];
 
-        g.position.set(x, this.O_Y + 2.2, z);
+        // Position will be set by orientOnPlanet in GameEngine
+        g.position.set(x, 0, z);
         g.userData = {
             type: 'golem',
             radius: 2.5,
             lArm, rArm, legs,
             interactive: true,
-            dialog: "need. soul. soul. in. big. green. roof."
+            dialog: "need. soul. soul. in. big. green. roof.",
+            heightOffset: 2.2
         };
         this.state.obstacles.push(g);
         return g;
@@ -195,19 +271,16 @@ export default class EntityFactory {
         const g = new THREE.Group();
         const stoneMat = this.getMat(p.baseRock.clone().lerp(new THREE.Color(0x888888), 0.5));
 
-        // Main peak - thicker by increasing base radius
         const peakGeo = new THREE.ConeGeometry(10 * scale, 12 * scale, 6);
         const peak = new THREE.Mesh(peakGeo, stoneMat);
         peak.position.y = 5 * scale;
         g.add(peak);
 
-        // Snow cap
         const capGeo = new THREE.ConeGeometry(4 * scale, 4 * scale, 6);
         const cap = new THREE.Mesh(capGeo, this.getMat(0xffffff));
         cap.position.y = 9 * scale;
         g.add(cap);
 
-        // Secondary peaks - also thicker
         for (let i = 0; i < 4; i++) {
             const s = (0.5 + Math.random() * 0.5) * scale;
             const subPeakGeo = new THREE.ConeGeometry(6 * s, 8 * s, 5);
@@ -218,7 +291,7 @@ export default class EntityFactory {
             g.add(subPeak);
         }
 
-        g.position.set(x, this.O_Y, z);
+        g.position.set(x, 0, z);
         g.userData = { type: 'mountain', radius: 8 * scale };
         this.state.obstacles.push(g);
         return g;
@@ -227,18 +300,15 @@ export default class EntityFactory {
     createGoldRock(p, x, z, scale = 1.0) {
         const g = new THREE.Group();
         const stoneMat = this.getMat(p.baseRock.clone().lerp(new THREE.Color(0x444444), 0.5));
-        const goldMat = this.getMat(0xffd700, false); // Shiny gold
+        const goldMat = this.getMat(0xffd700, false);
 
-        // Base rock - Simple Dodecahedron (One shape)
         const rockGeo = new THREE.DodecahedronGeometry(0.8 * scale, 0);
         const rock = new THREE.Mesh(rockGeo, stoneMat);
         g.add(rock);
 
-        // Gold ores sticking out - simple boxes
         for (let i = 0; i < 5; i++) {
             const oreGeo = new THREE.BoxGeometry(0.2 * scale, 0.2 * scale, 0.2 * scale);
             const ore = new THREE.Mesh(oreGeo, goldMat);
-
             const phi = Math.random() * Math.PI * 2;
             const theta = Math.random() * Math.PI;
             const r = 0.7 * scale;
@@ -251,8 +321,8 @@ export default class EntityFactory {
             g.add(ore);
         }
 
-        g.position.set(x, this.O_Y + 0.2 * scale, z);
-        g.userData = { type: 'gold_rock', radius: 0.8 * scale, color: p.baseRock };
+        g.position.set(x, 0, z);
+        g.userData = { type: 'gold_rock', radius: 0.8 * scale, color: p.baseRock, heightOffset: 0.2 * scale };
         this.state.obstacles.push(g);
         return g;
     }
@@ -272,10 +342,10 @@ export default class EntityFactory {
         leaves.position.y = dna.height;
         if (dna.shape === 'cone') leaves.position.y += 0.2;
         g.add(trunk, leaves);
-        g.position.set(x, this.O_Y, z);
+        g.position.set(x, 0, z);
         g.rotation.y = Math.random() * Math.PI * 2;
         g.scale.set(0, 0, 0);
-        g.userData = { type: 'tree', radius: 0.6, style: dna, color: dna.color, productionTimer: Math.random() * 20, health: 5, choppable: true };
+        g.userData = { type: 'tree', radius: 0.6, style: dna, color: dna.color, productionTimer: Math.random() * 20, health: 5, choppable: true, heightOffset: 0 };
         this.state.obstacles.push(g);
         return g;
     }
@@ -290,10 +360,10 @@ export default class EntityFactory {
         m.position.y = dna.shape === 'flat' ? 0.05 : 0.35 * dna.scaleY;
         if (dna.shape !== 'flat') m.scale.y = dna.scaleY;
         g.add(m);
-        g.position.set(x, this.O_Y, z);
+        g.position.set(x, 0, z);
         g.rotation.y = Math.random() * Math.PI * 2;
         g.scale.set(0, 0, 0);
-        g.userData = { type: 'bush', radius: 0.4, style: dna, color: dna.color, productionTimer: Math.random() * 20 };
+        g.userData = { type: 'bush', radius: 0.4, style: dna, color: dna.color, productionTimer: Math.random() * 20, heightOffset: 0 };
         return g;
     }
 
@@ -307,9 +377,9 @@ export default class EntityFactory {
         if (dna.shape === 'slab') m.rotation.y = Math.random() * Math.PI;
         else m.rotation.set(Math.random(), Math.random(), Math.random());
         g.add(m);
-        g.position.set(x, this.O_Y, z);
+        g.position.set(x, 0, z);
         g.scale.set(0, 0, 0);
-        g.userData = { type: 'rock', style: dna, color: dna.color };
+        g.userData = { type: 'rock', style: dna, color: dna.color, heightOffset: 0 };
         return g;
     }
 
@@ -320,9 +390,9 @@ export default class EntityFactory {
         const m = new THREE.Mesh(new THREE.BoxGeometry(0.07, dna.height, 0.07), this.getMat(dna.color));
         m.position.y = dna.height / 2;
         g.add(m);
-        g.position.set(x, this.O_Y, z);
+        g.position.set(x, 0, z);
         g.scale.set(0, 0, 0);
-        g.userData = { type: 'grass', style: dna, color: dna.color, growTimer: Math.random() * 30 };
+        g.userData = { type: 'grass', style: dna, color: dna.color, growTimer: Math.random() * 30, heightOffset: 0 };
         return g;
     }
 
@@ -336,36 +406,9 @@ export default class EntityFactory {
         const center = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.07), this.getMat(dna.centerColor));
         center.position.y = dna.height + 0.1;
         g.add(stem, petals, center);
-        g.position.set(x, this.O_Y, z);
+        g.position.set(x, 0, z);
         g.scale.set(0, 0, 0);
-        g.userData = { type: 'flower', style: dna, color: dna.petalColor };
-        return g;
-    }
-
-    createCloud(x, y, z) {
-        const g = new THREE.Group();
-        const cloudColor = new THREE.Color(0xffffff);
-        const cloudMat = new THREE.MeshLambertMaterial({ color: cloudColor, transparent: true, opacity: 0.8 });
-
-        const sizes = [
-            { w: 8 + Math.random() * 6, h: 1 + Math.random() * 1, d: 4 + Math.random() * 3 },
-            { w: 6 + Math.random() * 4, h: 0.8 + Math.random() * 0.8, d: 3 + Math.random() * 2 },
-            { w: 5 + Math.random() * 3, h: 0.6 + Math.random() * 0.6, d: 2.5 + Math.random() * 2 }
-        ];
-
-        for (let i = 0; i < 3; i++) {
-            const geo = new THREE.BoxGeometry(sizes[i].w, sizes[i].h, sizes[i].d);
-            const mesh = new THREE.Mesh(geo, cloudMat);
-            mesh.position.set(
-                (Math.random() - 0.5) * 2,
-                (Math.random() - 0.5) * 0.5,
-                (Math.random() - 0.5) * 1.5
-            );
-            g.add(mesh);
-        }
-
-        g.position.set(x, y, z);
-        g.userData = { type: 'cloud' };
+        g.userData = { type: 'flower', style: dna, color: dna.petalColor, heightOffset: 0 };
         return g;
     }
 
@@ -459,14 +502,15 @@ export default class EntityFactory {
                 else { g.add(addEye(eyeX, eyeY, eyeZ, rot)); g.add(addEye(-eyeX, eyeY, eyeZ, -rot)); g.add(addEye(0, eyeY + 0.1, 0.25, 0)); }
             }
         }
-        g.position.set(x, this.O_Y + 0.3, z);
+        g.position.set(x, 0, z);
         g.scale.set(0, 0, 0);
         const radius = 0.5 * scale;
         g.userData = {
             type: 'creature', speciesType: dna.speciesType, radius: radius, hunger: 0, age: 0, eatenCount: 0,
             moveSpeed: moveSpeed, hopOffset: Math.random() * 100,
             color: dna.color, bubble: null, style: dna, targetScale: scale, cooldown: 0,
-            hp: 6, aggroTimer: 0, contactCooldown: 0
+            hp: 6, aggroTimer: 0, contactCooldown: 0,
+            heightOffset: 0.3
         };
         return g;
     }
@@ -483,8 +527,8 @@ export default class EntityFactory {
         const e1 = new THREE.Mesh(eyeGeo, eyeMat); e1.position.set(0.15, 0.7, 0.25);
         const e2 = new THREE.Mesh(eyeGeo, eyeMat); e2.position.set(-0.15, 0.7, 0.25);
         g.add(body, crown, e1, e2);
-        g.position.set(x, this.O_Y + 0.3, z);
-        g.userData = { type: 'chief', name: 'Chief Ruru', loreFile: 'data/chief_lore.txt', canChat: true, radius: 0.6, moveSpeed: 0.045, color: color, fleeTimer: 0 };
+        g.position.set(x, 0, z);
+        g.userData = { type: 'chief', name: 'Chief Ruru', loreFile: 'data/chief_lore.txt', canChat: true, radius: 0.6, moveSpeed: 0.045, color: color, fleeTimer: 0, heightOffset: 0.3 };
         return g;
     }
 
@@ -493,9 +537,9 @@ export default class EntityFactory {
         const eggMesh = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 8), this.getMat(color));
         eggMesh.scale.y = 1.3;
         g.add(eggMesh);
-        g.position.set(pos.x, this.O_Y + 0.3, pos.z);
+        g.position.copy(pos);
         g.scale.set(0, 0, 0);
-        g.userData = { type: 'egg', color: color, parentDNA: dna, hatchTimer: 10.0 };
+        g.userData = { type: 'egg', color: color, parentDNA: dna, hatchTimer: 10.0, heightOffset: 0.3 };
         return g;
     }
 
@@ -517,16 +561,16 @@ export default class EntityFactory {
 
     createLog(palette, x, z) {
         const g = new THREE.Group();
-        const log = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.12, 0.12, 0.8, 6),
-            this.getMat(palette.trunk)
-        );
-        log.rotation.z = Math.PI / 2;
-        log.position.y = 0.12;
-        g.add(log);
-        g.position.set(x, this.O_Y, z);
+        const logColor = (palette && palette.trunk) ? palette.trunk :
+            (palette instanceof THREE.Color ? palette : new THREE.Color(0x8B4513));
+        const trunkGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.8, 6);
+        const trunk = new THREE.Mesh(trunkGeo, this.getMat(logColor));
+        trunk.rotation.z = Math.PI / 2;
+        trunk.position.y = 0.12;
+        g.add(trunk);
+        g.position.set(x, 0, z);
         g.scale.set(0, 0, 0);
-        g.userData = { type: 'log', color: palette.trunk, autoPickup: true, onLand: true };
+        g.userData = { type: 'log', color: logColor, autoPickup: true, onLand: true, heightOffset: 0 };
         return g;
     }
 
@@ -538,7 +582,6 @@ export default class EntityFactory {
 
     createPickaxe(palette, x, z) {
         const g = new THREE.Group();
-
         const woodMaterial = new THREE.MeshStandardMaterial({ color: 0x5d4037, flatShading: true });
         const metalMaterial = new THREE.MeshStandardMaterial({ color: 0x555555, flatShading: true });
 
@@ -546,35 +589,29 @@ export default class EntityFactory {
         const handle = new THREE.Mesh(handleGeo, woodMaterial);
         g.add(handle);
 
-        // Pick head (curved or just two cones/boxes)
         const headGeo = new THREE.BoxGeometry(0.35, 0.04, 0.04);
         const head = new THREE.Mesh(headGeo, metalMaterial);
         head.position.y = 0.2;
-        // Curve it slightly by adding two angled pieces
         const tipL = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.15, 4), metalMaterial);
         tipL.rotation.z = Math.PI / 2 + 0.3;
         tipL.position.x = -0.15;
         tipL.position.y = 0.16;
-
         const tipR = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.15, 4), metalMaterial);
         tipR.rotation.z = -Math.PI / 2 - 0.3;
         tipR.position.x = 0.15;
         tipR.position.y = 0.16;
-
         g.add(head, tipL, tipR);
 
-        g.position.set(x, this.O_Y + 0.1, z);
+        g.position.set(x, 0, z);
         g.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.5;
         g.rotation.y = Math.random() * Math.PI * 2;
         g.scale.set(1, 1, 1);
-        g.userData = { type: 'pickaxe', color: null };
-
+        g.userData = { type: 'pickaxe', color: null, heightOffset: 0.1 };
         return g;
     }
 
     createAxe(palette, x, z) {
         const g = new THREE.Group();
-
         const woodMaterial = new THREE.MeshStandardMaterial({ color: 0x5d4037, flatShading: true });
         const metalMaterial = new THREE.MeshStandardMaterial({ color: 0x78909c, flatShading: true });
         const edgeMaterial = new THREE.MeshStandardMaterial({ color: 0xeeeeee, flatShading: true });
@@ -602,183 +639,123 @@ export default class EntityFactory {
         edge.rotation.x = Math.PI / 8;
         g.add(edge);
 
-        g.position.set(x, this.O_Y + 0.1, z);
+        g.position.set(x, 0, z);
         g.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.5;
         g.rotation.y = Math.random() * Math.PI * 2;
         g.scale.set(0, 0, 0);
-        g.userData = { type: 'axe', color: null };
-
+        g.userData = { type: 'axe', color: null, heightOffset: 0.1 };
         return g;
     }
 
-    // Create island at a specific world position with given radius
-    createIslandAt(palette, centerX, centerZ, radius, hasWater = false) {
+    createStatBoost(x, z, boostData) {
         const g = new THREE.Group();
-        const segments = Math.max(20, Math.floor(radius * 4));
-        const baseR = radius;
-        const soilR = radius * 0.93;
-        const grassR = radius * 0.9;
+        const colorMap = { attack: 0xff4444, speed: 0x44ff44, health: 0xff88cc };
+        const color = new THREE.Color(colorMap[boostData.stat] || 0xffffff);
 
-        const base = new THREE.Mesh(this.generateTerrain(baseR, segments, -0.3, 0.3), this.getMat(palette.baseRock));
-        base.rotation.x = -Math.PI / 2; base.position.y = -2;
-        const soil = new THREE.Mesh(this.generateTerrain(soilR, segments, -0.2, 0.2), this.getMat(palette.soil));
-        soil.rotation.x = -Math.PI / 2; soil.position.y = -1.5;
-        const grass = new THREE.Mesh(this.generateTerrain(grassR, segments, -0.1, 0.1), this.getMat(palette.groundTop));
-        grass.rotation.x = -Math.PI / 2; grass.position.y = this.O_Y;
-        grass.userData = { type: 'ground' };
-        g.add(base, soil, grass);
+        const crystalGeo = new THREE.OctahedronGeometry(0.15, 0);
+        const crystalMat = new THREE.MeshStandardMaterial({
+            color: color,
+            emissive: color,
+            emissiveIntensity: 0.6,
+            flatShading: true
+        });
+        const crystal = new THREE.Mesh(crystalGeo, crystalMat);
+        crystal.position.y = 0.3;
+        g.add(crystal);
 
-        if (hasWater) {
-            const waterGeo = new THREE.CircleGeometry(200, 50);
-            const wp = waterGeo.attributes.position;
-            for (let i = 1; i < wp.count; i++) wp.setZ(i, wp.getZ(i) + (Math.random() - 0.5) * 0.8);
-            waterGeo.computeVertexNormals();
-            const waterColor = palette.background.clone().lerp(new THREE.Color(0x0066aa), 0.7);
-            const water = new THREE.Mesh(waterGeo, new THREE.MeshPhongMaterial({ color: waterColor, transparent: true, opacity: 0.6, shininess: 90, flatShading: true }));
-            water.rotation.x = -Math.PI / 2;
-            water.position.y = -2.0;
-            water.userData = { type: 'water' };
-            g.add(water);
-        }
-
-        g.position.set(centerX, 0, centerZ);
-        return { group: g, groundPlane: grass, center: new THREE.Vector3(centerX, 0, centerZ), radius: grassR };
-    }
-
-    // Legacy wrapper
-    createIsland(palette) {
-        return this.createIslandAt(palette, 0, 0, 7, true);
-    }
-
-    createLog(color, x, z) {
-        const g = new THREE.Group();
-        const logColor = color instanceof THREE.Color ? color : new THREE.Color(0x8B4513);
-        const trunkGeo = new THREE.CylinderGeometry(0.3, 0.35, 3, 8);
-        const trunk = new THREE.Mesh(trunkGeo, this.getMat(logColor));
-        trunk.rotation.z = Math.PI / 2;
-        trunk.position.y = -1.7;
-        g.add(trunk);
         g.position.set(x, 0, z);
-        g.rotation.y = Math.random() * Math.PI * 2;
-        g.userData = { type: 'log', color: logColor, autoPickup: true };
+        g.scale.set(0, 0, 0);
+        g.userData = {
+            type: 'statBoost',
+            stat: boostData.stat,
+            amount: boostData.amount,
+            color: color,
+            crystal: crystal,
+            heightOffset: 0
+        };
         return g;
     }
 
-    createBoat(x, z, color) {
+    /**
+     * Create a spaceship (replaces boat).
+     */
+    createSpaceship(x, y, z, color) {
         const g = new THREE.Group();
-        const darkWood = color.clone().multiplyScalar(0.6);
-        const lightWood = color.clone().lerp(new THREE.Color(0xddccaa), 0.3);
+        const darkMetal = color.clone().multiplyScalar(0.6);
+        const lightMetal = color.clone().lerp(new THREE.Color(0xddccee), 0.3);
 
-        // Hull bottom (tapered keel shape, length along Z)
-        const hullGeo = new THREE.BoxGeometry(1.6, 0.5, 3.8);
-        const hull = new THREE.Mesh(hullGeo, this.getMat(darkWood));
-        hull.position.y = -2.0;
-        hull.scale.set(1, 0.7, 1);
+        // Main hull (elongated)
+        const hullGeo = new THREE.BoxGeometry(1.6, 0.6, 3.8);
+        const hull = new THREE.Mesh(hullGeo, this.getMat(darkMetal));
         g.add(hull);
 
-        // Hull upper / gunwales (wider at top)
-        const upperHullGeo = new THREE.BoxGeometry(1.9, 0.35, 3.6);
-        const upperHull = new THREE.Mesh(upperHullGeo, this.getMat(color));
-        upperHull.position.y = -1.6;
-        g.add(upperHull);
+        // Upper hull
+        const upperGeo = new THREE.BoxGeometry(1.2, 0.4, 2.8);
+        const upper = new THREE.Mesh(upperGeo, this.getMat(color));
+        upper.position.y = 0.4;
+        g.add(upper);
 
-        // Deck planks
-        const deckGeo = new THREE.BoxGeometry(1.5, 0.08, 3.0);
-        const deck = new THREE.Mesh(deckGeo, this.getMat(lightWood));
-        deck.position.y = -1.42;
-        g.add(deck);
+        // Cockpit dome
+        const cockpitGeo = new THREE.SphereGeometry(0.5, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+        const cockpitMat = new THREE.MeshPhongMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5, flatShading: true });
+        const cockpit = new THREE.Mesh(cockpitGeo, cockpitMat);
+        cockpit.position.set(0, 0.5, -0.8);
+        g.add(cockpit);
 
-        // Deck plank lines (cross beams for detail)
-        for (let i = -1; i <= 1; i++) {
-            const beam = new THREE.Mesh(
-                new THREE.BoxGeometry(1.5, 0.1, 0.06),
-                this.getMat(darkWood)
-            );
-            beam.position.set(0, -1.38, i * 0.8);
-            g.add(beam);
-        }
-
-        // Bow (front = -Z direction, pointed)
-        const bowGeo = new THREE.ConeGeometry(0.65, 1.4, 4);
-        const bow = new THREE.Mesh(bowGeo, this.getMat(color));
-        bow.rotation.x = -Math.PI / 2; // point along -Z
-        bow.position.set(0, -1.75, -2.4);
-        g.add(bow);
-
-        // Stern (back = +Z, flat transom)
-        const sternGeo = new THREE.BoxGeometry(1.6, 0.7, 0.15);
-        const stern = new THREE.Mesh(sternGeo, this.getMat(darkWood));
-        stern.position.set(0, -1.75, 1.9);
-        g.add(stern);
-
-        // Keel (bottom ridge)
-        const keelGeo = new THREE.BoxGeometry(0.12, 0.2, 3.2);
-        const keel = new THREE.Mesh(keelGeo, this.getMat(darkWood));
-        keel.position.y = -2.35;
-        g.add(keel);
-
-        // Mast
-        const mastGeo = new THREE.CylinderGeometry(0.05, 0.07, 2.8, 6);
-        const mast = new THREE.Mesh(mastGeo, this.getMat(darkWood));
-        mast.position.set(0, -0.05, -0.4);
-        g.add(mast);
-
-        // Boom (horizontal spar)
-        const boomGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.6, 4);
-        const boom = new THREE.Mesh(boomGeo, this.getMat(darkWood));
-        boom.rotation.z = Math.PI / 2;
-        boom.position.set(0.4, -0.6, -0.4);
-        g.add(boom);
-
-        // Sail (triangular-ish, offset to one side for character)
-        const sailShape = new THREE.Shape();
-        sailShape.moveTo(0, 0);
-        sailShape.lineTo(0, 2.0);
-        sailShape.lineTo(1.3, 0);
-        sailShape.closePath();
-        const sailGeo = new THREE.ShapeGeometry(sailShape);
-        const sailColor = new THREE.Color(0xfff5e6);
-        const sail = new THREE.Mesh(sailGeo, new THREE.MeshToonMaterial({ color: sailColor, side: THREE.DoubleSide, flatShading: true }));
-        sail.position.set(0.01, -0.85, -0.4);
-        sail.rotation.y = Math.PI / 2;
-        g.add(sail);
-
-        // Rudder (at stern, below waterline)
-        const rudderGeo = new THREE.BoxGeometry(0.06, 0.6, 0.35);
-        const rudder = new THREE.Mesh(rudderGeo, this.getMat(darkWood));
-        rudder.position.set(0, -2.3, 2.0);
-        g.add(rudder);
-
-        // Side rail posts (gunwale details)
-        const postPositions = [-1.0, 0, 1.0];
-        postPositions.forEach(pz => {
-            [-0.85, 0.85].forEach(px => {
-                const post = new THREE.Mesh(
-                    new THREE.CylinderGeometry(0.03, 0.03, 0.35, 4),
-                    this.getMat(darkWood)
-                );
-                post.position.set(px, -1.25, pz);
-                g.add(post);
-            });
+        // Wings
+        [-1, 1].forEach(side => {
+            const wingGeo = new THREE.BoxGeometry(1.8, 0.08, 1.2);
+            const wing = new THREE.Mesh(wingGeo, this.getMat(darkMetal));
+            wing.position.set(side * 1.5, 0, 0.2);
+            wing.rotation.z = side * 0.1;
+            g.add(wing);
         });
 
-        g.position.set(x, 0, z);
+        // Engine nozzles
+        [-0.5, 0.5].forEach(xOff => {
+            const nozzleGeo = new THREE.CylinderGeometry(0.15, 0.2, 0.5, 6);
+            const nozzle = new THREE.Mesh(nozzleGeo, this.getMat(0x333333));
+            nozzle.rotation.x = Math.PI / 2;
+            nozzle.position.set(xOff, -0.1, 2.1);
+            g.add(nozzle);
+
+            // Engine glow
+            const glowMat = new THREE.MeshBasicMaterial({ color: 0x44aaff, transparent: true, opacity: 0.6 });
+            const glowGeo = new THREE.SphereGeometry(0.12, 6, 4);
+            const glow = new THREE.Mesh(glowGeo, glowMat);
+            glow.position.set(xOff, -0.1, 2.35);
+            glow.userData = { isEngineGlow: true };
+            g.add(glow);
+        });
+
+        // Deck platform (for the player to stand on)
+        const deckGeo = new THREE.BoxGeometry(1.2, 0.08, 2.0);
+        const deck = new THREE.Mesh(deckGeo, this.getMat(lightMetal));
+        deck.position.y = 0.65;
+        g.add(deck);
+
+        g.position.set(x, y, z);
         g.userData = {
-            type: 'boat',
+            type: 'spaceship',
             color: color,
             radius: 2.5,
             stats: {
                 health: BOAT_BASE_HEALTH,
                 maxHealth: BOAT_BASE_HEALTH,
                 currentSpeed: 0,
-                maxSpeed: BOAT_BASE_MAX_SPEED,
-                acceleration: BOAT_BASE_ACCELERATION,
+                maxSpeed: BOAT_BASE_MAX_SPEED * 2,
+                acceleration: BOAT_BASE_ACCELERATION * 1.5,
                 turnSpeed: BOAT_BASE_TURN_SPEED,
                 drag: BOAT_BASE_DRAG,
-                brake: BOAT_BASE_BRAKE
+                brake: BOAT_BASE_BRAKE * 1.5
             }
         };
         return g;
+    }
+
+    // Legacy boat creation (now creates spaceship)
+    createBoat(x, z, color) {
+        return this.createSpaceship(x, 0, z, color);
     }
 
     createCat(x, z) {
@@ -789,7 +766,6 @@ export default class EntityFactory {
         const pink = new THREE.Color(0xFFB6C1);
         const eyeGreen = new THREE.Color(0x6BA54A);
 
-        // Body (elongated box, white belly implied by front being white)
         const body = new THREE.Mesh(
             new THREE.BoxGeometry(0.45, 0.35, 0.7),
             this.getMat(orange)
@@ -797,7 +773,6 @@ export default class EntityFactory {
         body.position.y = 0.35;
         g.add(body);
 
-        // White belly patch
         const belly = new THREE.Mesh(
             new THREE.BoxGeometry(0.35, 0.12, 0.55),
             this.getMat(white)
@@ -805,7 +780,6 @@ export default class EntityFactory {
         belly.position.set(0, 0.14, 0);
         body.add(belly);
 
-        // Head
         const head = new THREE.Mesh(
             new THREE.BoxGeometry(0.38, 0.32, 0.32),
             this.getMat(orange)
@@ -813,7 +787,6 @@ export default class EntityFactory {
         head.position.set(0, 0.48, -0.42);
         g.add(head);
 
-        // White face/muzzle area
         const muzzle = new THREE.Mesh(
             new THREE.BoxGeometry(0.26, 0.16, 0.1),
             this.getMat(white)
@@ -821,7 +794,6 @@ export default class EntityFactory {
         muzzle.position.set(0, -0.06, -0.14);
         head.add(muzzle);
 
-        // Nose (pink)
         const nose = new THREE.Mesh(
             new THREE.BoxGeometry(0.06, 0.04, 0.04),
             this.getMat(pink)
@@ -829,7 +801,6 @@ export default class EntityFactory {
         nose.position.set(0, -0.01, -0.18);
         head.add(nose);
 
-        // Eyes
         const eyeGeo = new THREE.SphereGeometry(0.04, 6, 6);
         const pupGeo = new THREE.SphereGeometry(0.02, 4, 4);
         const eyeMat = this.getMat(eyeGreen);
@@ -844,7 +815,6 @@ export default class EntityFactory {
             head.add(pupil);
         });
 
-        // Ears (triangular cones, orange)
         [-1, 1].forEach(side => {
             const ear = new THREE.Mesh(
                 new THREE.ConeGeometry(0.07, 0.16, 4),
@@ -853,7 +823,6 @@ export default class EntityFactory {
             ear.position.set(side * 0.12, 0.2, -0.02);
             ear.rotation.z = side * 0.2;
             head.add(ear);
-            // Inner ear (pink)
             const innerEar = new THREE.Mesh(
                 new THREE.ConeGeometry(0.04, 0.1, 4),
                 this.getMat(pink)
@@ -862,14 +831,13 @@ export default class EntityFactory {
             ear.add(innerEar);
         });
 
-        // Legs (4 white paws)
         const legGeo = new THREE.BoxGeometry(0.1, 0.2, 0.1);
         const legMat = this.getMat(white);
         const legPositions = [
-            { x: -0.14, z: -0.22 },  // front-left
-            { x: 0.14, z: -0.22 },   // front-right
-            { x: -0.14, z: 0.22 },   // back-left
-            { x: 0.14, z: 0.22 }     // back-right
+            { x: -0.14, z: -0.22 },
+            { x: 0.14, z: -0.22 },
+            { x: -0.14, z: 0.22 },
+            { x: 0.14, z: 0.22 }
         ];
         const legs = [];
         legPositions.forEach(lp => {
@@ -879,7 +847,6 @@ export default class EntityFactory {
             legs.push(leg);
         });
 
-        // Tail (curved, orange with white tip)
         const tailBase = new THREE.Mesh(
             new THREE.CylinderGeometry(0.03, 0.04, 0.4, 4),
             this.getMat(orange)
@@ -896,7 +863,6 @@ export default class EntityFactory {
         tailTip.rotation.x = -0.4;
         tailBase.add(tailTip);
 
-        // White chest patch (front of body)
         const chest = new THREE.Mesh(
             new THREE.BoxGeometry(0.3, 0.25, 0.08),
             this.getMat(white)
@@ -904,7 +870,7 @@ export default class EntityFactory {
         chest.position.set(0, 0.02, -0.32);
         body.add(chest);
 
-        g.position.set(x, this.O_Y, z);
+        g.position.set(x, 0, z);
         g.userData = {
             type: 'cat',
             radius: 0.4,
@@ -914,74 +880,9 @@ export default class EntityFactory {
             hopOffset: Math.random() * 100,
             followDist: 1.8,
             idleTimer: 0,
-            isIdle: false
+            isIdle: false,
+            heightOffset: 0
         };
-        return g;
-    }
-
-    createStatBoost(x, z, boostData) {
-        // boostData: { stat: 'attack'|'speed'|'health', amount: number }
-        const g = new THREE.Group();
-        const colorMap = { attack: 0xff4444, speed: 0x44ff44, health: 0xff88cc };
-        const color = new THREE.Color(colorMap[boostData.stat] || 0xffffff);
-
-        // Small glowing gem
-        const crystalGeo = new THREE.OctahedronGeometry(0.15, 0);
-        const crystalMat = new THREE.MeshStandardMaterial({
-            color: color,
-            emissive: color,
-            emissiveIntensity: 0.6,
-            flatShading: true
-        });
-        const crystal = new THREE.Mesh(crystalGeo, crystalMat);
-        crystal.position.y = 0.3;
-        g.add(crystal);
-
-        g.position.set(x, this.O_Y, z);
-        g.scale.set(0, 0, 0);
-        g.userData = {
-            type: 'statBoost',
-            stat: boostData.stat,
-            amount: boostData.amount,
-            color: color,
-            crystal: crystal
-        };
-        return g;
-    }
-
-    createHintIsland(palette, offsetX, scale = 0.4) {
-        const g = new THREE.Group();
-        g.position.x = offsetX;
-        g.position.z = 25;
-
-        const base = new THREE.Mesh(this.generateTerrain(2.8 * scale, 24, -0.25, 0.25), this.getMat(palette.baseRock));
-        base.rotation.x = -Math.PI / 2; base.position.y = -2;
-        const soil = new THREE.Mesh(this.generateTerrain(2.5 * scale, 24, -0.2, 0.2), this.getMat(palette.soil));
-        soil.rotation.x = -Math.PI / 2; soil.position.y = -1.5;
-        const grass = new THREE.Mesh(this.generateTerrain(2.3 * scale, 24, -0.15, 0.15), this.getMat(palette.groundTop));
-        grass.rotation.x = -Math.PI / 2; grass.position.y = this.O_Y * scale;
-
-        const sideGeo = new THREE.CylinderGeometry(1.8 * scale, 2.2 * scale, 3.5, 24, 2, true);
-        const sidePos = sideGeo.attributes.position;
-        for (let i = 0; i < sidePos.count; i++) {
-            const x = sidePos.getX(i);
-            const y = sidePos.getY(i);
-            const z = sidePos.getZ(i);
-            const angle = Math.atan2(z, x);
-            const wave = Math.sin(angle * 8 + y * 2) * 0.15 * scale;
-            sidePos.setX(i, x + wave);
-            sidePos.setZ(i, z + wave);
-            const py = (y + 1.75) / 3.5;
-            sidePos.setY(i, y + (Math.random() - 0.5) * 0.2 * (1 - py));
-        }
-        sideGeo.computeVertexNormals();
-        const sideMat = this.getMat(palette.baseRock);
-        sideMat.side = THREE.DoubleSide;
-        const side = new THREE.Mesh(sideGeo, sideMat);
-        side.position.y = -0.75;
-
-        g.add(base, soil, grass, side);
-        g.userData = { type: 'hintIsland' };
         return g;
     }
 }

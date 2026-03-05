@@ -1,6 +1,8 @@
 // =====================================================
-// INPUT HANDLER - THIRD PERSON CONTROLS + BOAT
+// INPUT HANDLER - Controls adapted for spherical planets
 // =====================================================
+
+import SphericalUtils from './SphericalUtils.js';
 
 export default class InputHandler {
     constructor(engine) {
@@ -332,29 +334,7 @@ export default class InputHandler {
         const it = state.inventory[state.selectedSlot];
         if (!it) return;
 
-        // Check if placing on water (for log/boat building)
-        if ((it.type === 'wood' || it.type === 'log') && this.engine.waterMesh) {
-            const waterHits = this.raycaster.intersectObject(this.engine.waterMesh);
-            if (waterHits.length && waterHits[0].distance < 15) {
-                sfx.place();
-                const p = waterHits[0].point;
-                const logColor = it.color || new THREE.Color(0x8B4513);
-                const log = factory.createLog(logColor, p.x, p.z);
-                world.add(log);
-                state.entities.push(log);
-                this.engine.logs.push(log);
-                for (let i = 0; i < 8; i++) factory.createParticle(p, logColor);
-                it.count = (it.count || 1) - 1;
-                if (it.count <= 0) { state.inventory[state.selectedSlot] = null; state.selectedSlot = null; }
-                this.engine.updateInventory();
-                this._updateHeldToolVisual();
-                this.checkForBoat();
-                this.updateBuildProgress();
-                return;
-            }
-        }
-
-        // Check ground planes for placement
+        // Check ground planes (planet surfaces) for placement
         const allHits = [];
         this.engine.groundPlanes.forEach(gp => {
             const hits = this.raycaster.intersectObject(gp);
@@ -428,8 +408,8 @@ export default class InputHandler {
                 return;
             }
 
-            if (root.userData.type === 'boat') {
-                // Boats are boarded with E key, not picked up
+            if (root.userData.type === 'boat' || root.userData.type === 'spaceship') {
+                // Spaceships are boarded with E key, not picked up
                 return;
             }
 
@@ -492,17 +472,21 @@ export default class InputHandler {
         const factory = this.engine.factory;
         let ent = null;
 
-        if (it.type === 'tree') ent = factory.createTree(state.palette, p.x, p.z, it.style);
-        if (it.type === 'bush') ent = factory.createBush(state.palette, p.x, p.z, it.style);
-        if (it.type === 'rock') ent = factory.createRock(state.palette, p.x, p.z, it.style);
-        if (it.type === 'grass') ent = factory.createGrass(state.palette, p.x, p.z, it.style);
-        if (it.type === 'flower') ent = factory.createFlower(state.palette, p.x, p.z, it.style);
+        // Find nearest planet to placement point for orientation
+        const result = SphericalUtils.findNearestPlanet(p, state.islands);
+        const planet = result ? result.planet : null;
+
+        if (it.type === 'tree') ent = factory.createTree(state.palette, 0, 0, it.style);
+        if (it.type === 'bush') ent = factory.createBush(state.palette, 0, 0, it.style);
+        if (it.type === 'rock') ent = factory.createRock(state.palette, 0, 0, it.style);
+        if (it.type === 'grass') ent = factory.createGrass(state.palette, 0, 0, it.style);
+        if (it.type === 'flower') ent = factory.createFlower(state.palette, 0, 0, it.style);
         if (it.type === 'wood' || it.type === 'log') {
-            ent = factory.createLog(it.color, p.x, p.z);
+            ent = factory.createLog(it.color, 0, 0);
             this.engine.logs.push(ent);
         }
         if (it.type === 'creature') {
-            ent = factory.createCreature(state.palette, p.x, p.z, it.style);
+            ent = factory.createCreature(state.palette, 0, 0, it.style);
             if (it.age) ent.userData.age = it.age;
         }
         if (it.type === 'egg') {
@@ -511,16 +495,34 @@ export default class InputHandler {
         if (it.type === 'food') {
             ent = new THREE.Mesh(new THREE.IcosahedronGeometry(0.15), factory.getMat(it.color));
             ent.position.copy(p);
-            ent.position.y = factory.O_Y + 0.15;
             ent.scale.set(0, 0, 0);
+            if (planet) ent.userData.planet = planet;
             world.add(ent);
             state.foods.push(ent);
             return ent;
         }
 
         if (ent) {
+            // Orient on planet surface
+            if (planet) {
+                const normal = SphericalUtils.getSurfaceNormal(p, planet);
+                const heightOffset = ent.userData.heightOffset || 0;
+                const surfPos = planet.center.clone().add(normal.clone().multiplyScalar(planet.radius + heightOffset));
+                ent.position.copy(surfPos);
+                const q = SphericalUtils.getOrientationOnSurface(normal);
+                ent.quaternion.copy(q);
+                ent.userData.planet = planet;
+            } else {
+                ent.position.copy(p);
+            }
             world.add(ent);
             state.entities.push(ent);
+
+            // Check for spaceship building after placing logs
+            if (it.type === 'wood' || it.type === 'log') {
+                this.checkForBoat();
+                this.updateBuildProgress();
+            }
         }
         return ent;
     }
@@ -552,24 +554,30 @@ export default class InputHandler {
             }
 
             if (cluster.length >= 4) {
-                let centerX = 0, centerZ = 0;
+                let center = new THREE.Vector3();
                 let boatColor = logs[cluster[0]].userData.color;
                 cluster.forEach(idx => {
-                    centerX += logs[idx].position.x;
-                    centerZ += logs[idx].position.z;
+                    center.add(logs[idx].position);
                     world.remove(logs[idx]);
                     const entIdx = state.entities.indexOf(logs[idx]);
                     if (entIdx > -1) state.entities.splice(entIdx, 1);
                 });
-                centerX /= cluster.length;
-                centerZ /= cluster.length;
+                center.divideScalar(cluster.length);
 
-                const boat = factory.createBoat(centerX, centerZ, boatColor);
+                // Create spaceship in space near the planet surface
+                const result = SphericalUtils.findNearestPlanet(center, state.islands);
+                let spawnPos = center.clone();
+                if (result && result.planet) {
+                    const normal = SphericalUtils.getSurfaceNormal(center, result.planet);
+                    spawnPos = result.planet.center.clone().add(normal.multiplyScalar(result.planet.radius + 3));
+                }
+
+                const boat = factory.createSpaceship(spawnPos.x, spawnPos.y, spawnPos.z, boatColor);
                 world.add(boat);
                 state.entities.push(boat);
                 sfx.boatBuild();
                 for (let k = 0; k < 30; k++) {
-                    factory.createParticle({ x: centerX, y: -1.5, z: centerZ }, boatColor, 2.0);
+                    factory.createParticle(spawnPos.clone(), boatColor, 2.0);
                 }
 
                 // Clean up logs array
@@ -610,9 +618,7 @@ export default class InputHandler {
         for (const e of state.entities) {
             // Choppable trees (when axe selected)
             if (e.userData.choppable && selectedType === 'axe') {
-                const dx = e.position.x - playerPos.x;
-                const dz = e.position.z - playerPos.z;
-                const dist = Math.sqrt(dx * dx + dz * dz);
+                const dist = e.position.distanceTo(playerPos);
                 if (dist < interactRange && dist < nearestDist) {
                     nearestDist = dist;
                     nearest = e;
@@ -622,9 +628,7 @@ export default class InputHandler {
             if ((e.userData.type === 'rock' || e.userData.type === 'gold_rock') && selectedType === 'pickaxe') {
                 // Only highlight large-scale rocks (obstacle rocks), not small drops
                 if (state.obstacles.includes(e) || e.userData.type === 'gold_rock') {
-                    const dx = e.position.x - playerPos.x;
-                    const dz = e.position.z - playerPos.z;
-                    const dist = Math.sqrt(dx * dx + dz * dz);
+                    const dist = e.position.distanceTo(playerPos);
                     if (dist < interactRange && dist < nearestDist) {
                         nearestDist = dist;
                         nearest = e;

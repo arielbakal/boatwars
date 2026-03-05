@@ -85,9 +85,7 @@ export default class InventoryManager {
         for (let i = state.entities.length - 1; i >= 0; i--) {
             const e = state.entities[i];
             if (!e.userData.autoPickup) continue;
-            const dx = e.position.x - playerPos.x;
-            const dz = e.position.z - playerPos.z;
-            const dist = Math.sqrt(dx * dx + dz * dz);
+            const dist = e.position.distanceTo(playerPos);
             if (dist < PICKUP_RANGE && e.scale.x > 0.5) {
                 if (e.userData.type === 'log') {
                     const added = this.addToInventory('wood', e.userData.color, null);

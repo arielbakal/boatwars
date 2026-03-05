@@ -1,6 +1,8 @@
 // =====================================================
-// CAT AI - Follow player, island clamping, boat queue
+// CAT AI - Follow player on spherical planets
 // =====================================================
+
+import SphericalUtils from '../classes/SphericalUtils.js';
 
 export default class CatAI {
     update(dt, context) {
@@ -9,27 +11,20 @@ export default class CatAI {
 
         const catData = cat.userData;
         const playerPos = state.player.pos;
-        const O_Y = factory.O_Y;
-        const dx = playerPos.x - cat.position.x;
-        const dz = playerPos.z - cat.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
+        const dist = playerPos.distanceTo(cat.position);
 
-        // Find which island the cat is on
-        let catIsland = null;
-        for (const island of state.islands) {
-            const ix = cat.position.x - island.center.x;
-            const iz = cat.position.z - island.center.z;
-            if (ix * ix + iz * iz < (island.radius * 0.95) ** 2) {
-                catIsland = island;
-                break;
-            }
+        // Find which planet the cat is on
+        let catPlanet = cat.userData.planet;
+        if (!catPlanet && state.islands.length > 0) {
+            const result = SphericalUtils.findNearestPlanet(cat.position, state.islands);
+            catPlanet = result.planet;
+            cat.userData.planet = catPlanet;
         }
-        if (!catIsland) catIsland = state.islands[0];
+        if (!catPlanet) return;
 
-        // Check if player is on the same island
-        const px = playerPos.x - catIsland.center.x;
-        const pz = playerPos.z - catIsland.center.z;
-        const playerOnCatIsland = px * px + pz * pz < catIsland.radius * catIsland.radius;
+        // Check if player is on the same planet
+        const playerResult = SphericalUtils.findNearestPlanet(playerPos, state.islands);
+        const playerOnCatPlanet = playerResult.planet === catPlanet && playerResult.altitude < 5;
 
         // On boat / boarding → handled by BoatSystem
         if (state.catOnBoat || state.catBoarding) {
@@ -40,44 +35,50 @@ export default class CatAI {
         if (state.catBoardingQueued) {
             const boat = state.boardingTargetBoat || state.activeBoat;
             if (boat) {
-                const bx = boat.position.x - cat.position.x;
-                const bz = boat.position.z - cat.position.z;
-                const bDist = Math.sqrt(bx * bx + bz * bz);
+                const bDist = cat.position.distanceTo(boat.position);
                 if (bDist > 1.5) {
-                    const speed = catData.moveSpeed * 2.0;
-                    cat.position.x += (bx / bDist) * speed;
-                    cat.position.z += (bz / bDist) * speed;
-                    cat.rotation.y = Math.atan2(bx / bDist, bz / bDist) + Math.PI;
+                    const dir = boat.position.clone().sub(cat.position).normalize();
+                    const newPos = SphericalUtils.moveOnSurface(cat.position, dir, catData.moveSpeed * 2.0, catPlanet);
+                    cat.position.copy(newPos);
+                    // Orient toward boat
+                    const normal = SphericalUtils.getSurfaceNormal(cat.position, catPlanet);
+                    const q = SphericalUtils.getOrientationOnSurface(normal, dir);
+                    cat.quaternion.slerp(q, 0.2);
                     this.animateLegs(catData, t, 10, 0.06);
                 }
             }
             return;
         }
 
-        // Player on boat or different island → idle look
-        if (state.isOnBoat || !playerOnCatIsland) {
+        // Player on boat or different planet → idle look
+        if (state.isOnBoat || !playerOnCatPlanet) {
             catData.isIdle = true;
             if (dist > 0.3) {
-                const targetRot = Math.atan2(dx, dz) + Math.PI;
-                cat.rotation.y += (targetRot - cat.rotation.y) * 0.05;
+                const dir = playerPos.clone().sub(cat.position).normalize();
+                const normal = SphericalUtils.getSurfaceNormal(cat.position, catPlanet);
+                const q = SphericalUtils.getOrientationOnSurface(normal, dir);
+                cat.quaternion.slerp(q, 0.05);
             }
             this.resetLegs(catData);
         } else if (dist > catData.followDist) {
             // Follow player
             catData.isIdle = false;
             const speed = dist > 5 ? catData.moveSpeed * 2.5 : catData.moveSpeed;
-            const nx = dx / dist;
-            const nz = dz / dist;
-            cat.position.x += nx * speed;
-            cat.position.z += nz * speed;
-            cat.rotation.y = Math.atan2(nx, nz) + Math.PI;
+            const dir = playerPos.clone().sub(cat.position).normalize();
+            const newPos = SphericalUtils.moveOnSurface(cat.position, dir, speed, catPlanet);
+            cat.position.copy(newPos);
+            const normal = SphericalUtils.getSurfaceNormal(cat.position, catPlanet);
+            const q = SphericalUtils.getOrientationOnSurface(normal, dir);
+            cat.quaternion.slerp(q, 0.15);
             this.animateLegs(catData, t, 8, 0.05);
         } else {
             // Idle near player
             catData.isIdle = true;
             if (dist > 0.3) {
-                const targetRot = Math.atan2(dx, dz) + Math.PI;
-                cat.rotation.y += (targetRot - cat.rotation.y) * 0.05;
+                const dir = playerPos.clone().sub(cat.position).normalize();
+                const normal = SphericalUtils.getSurfaceNormal(cat.position, catPlanet);
+                const q = SphericalUtils.getOrientationOnSurface(normal, dir);
+                cat.quaternion.slerp(q, 0.05);
             }
             this.resetLegs(catData);
         }
@@ -88,17 +89,26 @@ export default class CatAI {
             catData.tail.rotation.x = 0.6 + Math.sin(t * 1.5) * 0.15;
         }
 
-        // Body bob
-        cat.position.y = O_Y + Math.sin(t * 3 + catData.hopOffset) * 0.015;
+        // Snap to surface with bob
+        const normal = SphericalUtils.getSurfaceNormal(cat.position, catPlanet);
+        const heightOffset = (catData.heightOffset || 0.3) + Math.sin(t * 3 + (catData.hopOffset || 0)) * 0.015;
+        const basePos = catPlanet.center.clone().add(normal.clone().multiplyScalar(catPlanet.radius + heightOffset));
+        cat.position.copy(basePos);
 
-        // Clamp to island
-        const rx = cat.position.x - catIsland.center.x;
-        const rz = cat.position.z - catIsland.center.z;
-        const maxR = catIsland.radius * 0.8;
-        if (rx * rx + rz * rz > maxR * maxR) {
-            const a = Math.atan2(rz, rx);
-            cat.position.x = catIsland.center.x + Math.cos(a) * maxR;
-            cat.position.z = catIsland.center.z + Math.sin(a) * maxR;
+        // Re-orient on surface
+        const q = SphericalUtils.getOrientationOnSurface(normal);
+        cat.quaternion.slerp(q, 0.05);
+
+        // Clamp to planet region
+        const bc = cat.userData.boundCenter;
+        const maxR = cat.userData.boundRadius || catPlanet.radius * 0.8;
+        if (bc) {
+            const d = cat.position.distanceTo(bc);
+            if (d > maxR) {
+                const dir = bc.clone().sub(cat.position).normalize();
+                const newPos = SphericalUtils.moveOnSurface(cat.position, dir, 0.1, catPlanet);
+                cat.position.copy(newPos);
+            }
         }
     }
 

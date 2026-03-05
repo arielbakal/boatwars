@@ -1,6 +1,6 @@
 // =====================================================
 // COMBAT SYSTEM - Player attack, creature aggro/contact,
-//                 death/respawn, stat boosts
+//                 death/respawn, stat boosts (spherical)
 // =====================================================
 
 import {
@@ -11,23 +11,21 @@ import {
     STAT_BOOST_PICKUP_RANGE, STAT_BOOST_BOB_SPEED, STAT_BOOST_BOB_HEIGHT, STAT_BOOST_SPIN_SPEED,
     CREATURE_ESSENCE_MAP, ATTACK_SWING_DURATION
 } from '../constants.js';
+import SphericalUtils from '../classes/SphericalUtils.js';
 
 export default class CombatSystem {
     constructor(ui) {
         this.ui = ui;
-        this._flashTimers = []; // entity flash timers for damage feedback
+        this._flashTimers = [];
     }
 
     update(dt, ctx) {
         const { state } = ctx;
 
-        // Tick attack cooldown
         if (state.attackCooldown > 0) state.attackCooldown -= dt;
 
-        // Tick invincibility
         if (state.invincibleTimer > 0) state.invincibleTimer -= dt;
 
-        // Clear attack flag after brief window
         if (state.isAttacking) {
             state._attackVisualTimer = (state._attackVisualTimer || 0) + dt;
             if (state._attackVisualTimer > ATTACK_SWING_DURATION) {
@@ -44,7 +42,7 @@ export default class CombatSystem {
             return;
         }
 
-        this._updateCreatureAggro(dt, state);
+        this._updateCreatureAggro(dt, state, ctx);
         this._updateCreatureContact(dt, ctx);
         this._updateStatBoosts(dt, state, ctx.world, ctx.audio, ctx.factory, ctx.t);
         this._updateUI(state);
@@ -55,39 +53,30 @@ export default class CombatSystem {
         if (state.isDead) return false;
         if (state.attackCooldown > 0) return false;
 
-        // Always swing — animation, sound, cooldown fire even on whiff
         state.attackCooldown = ATTACK_COOLDOWN;
         state.isAttacking = true;
         state._attackVisualTimer = 0;
 
-        audio.chop(); // reuse chop sound for attack
+        audio.chop();
 
         const damage = state.player.attack || PLAYER_BASE_ATTACK;
 
-        // Damage creatures in range
         const targets = this._findAttackTargets(state);
         for (const entity of targets) {
             this._damageEntity(entity, damage, ctx);
         }
 
-        // Damage remote players in range
         if (remotePlayers) {
             const hitPlayers = this._findRemotePlayerTargets(state, remotePlayers);
             for (const { id, playerData } of hitPlayers) {
-                // Visual feedback: flash + particles
                 this._flashEntity(playerData.pivot, 0xff0000, 0.2);
                 for (let i = 0; i < 6; i++) {
                     factory.createParticle(playerData.group.position.clone(), new THREE.Color(0xff4444), 0.8);
                 }
-                // Visual knockback on attacker's side
-                const dx = playerData.group.position.x - state.player.pos.x;
-                const dz = playerData.group.position.z - state.player.pos.z;
-                const dist = Math.sqrt(dx * dx + dz * dz) || 1;
-                playerData.group.position.x += (dx / dist) * 0.8;
-                playerData.group.position.z += (dz / dist) * 0.8;
-                playerData.targetPos.x += (dx / dist) * 0.8;
-                playerData.targetPos.z += (dz / dist) * 0.8;
-                // Send damage to victim via network
+                // 3D knockback
+                const dir = playerData.group.position.clone().sub(state.player.pos).normalize();
+                playerData.group.position.add(dir.clone().multiplyScalar(0.8));
+                playerData.targetPos.add(dir.clone().multiplyScalar(0.8));
                 if (broadcastWorldEvent) {
                     broadcastWorldEvent('player_attack', state.player.pos.x, state.player.pos.z, {
                         targetId: id,
@@ -103,27 +92,23 @@ export default class CombatSystem {
     _findAttackTargets(state) {
         const targets = [];
         const playerPos = state.player.pos;
-        const playerRot = state.player.targetRotation;
 
-        // Player forward direction
-        const fwdX = Math.sin(playerRot);
-        const fwdZ = Math.cos(playerRot);
+        // Get player forward direction from playerController if available
+        const playerForward = state._playerForward || new THREE.Vector3(0, 0, -1);
 
         for (const e of state.entities) {
             if (e.userData.type !== 'creature') continue;
             if (e.userData.hp === undefined || e.userData.hp <= 0) continue;
 
-            const dx = e.position.x - playerPos.x;
-            const dz = e.position.z - playerPos.z;
-            const dist = Math.sqrt(dx * dx + dz * dz);
+            const diff = e.position.clone().sub(playerPos);
+            const dist = diff.length();
 
             if (dist > ATTACK_RANGE) continue;
 
-            // Check if within forward arc (dot product)
+            // Check if within forward arc (dot product in 3D)
             if (dist > 0.01) {
-                const ndx = dx / dist;
-                const ndz = dz / dist;
-                const dot = fwdX * ndx + fwdZ * ndz;
+                const ndir = diff.normalize();
+                const dot = playerForward.dot(ndir);
                 if (dot < Math.cos(ATTACK_ARC / 2)) continue;
             }
 
@@ -136,21 +121,17 @@ export default class CombatSystem {
     _findRemotePlayerTargets(state, remotePlayers) {
         const hits = [];
         const playerPos = state.player.pos;
-        const playerRot = state.player.targetRotation;
-        const fwdX = Math.sin(playerRot);
-        const fwdZ = Math.cos(playerRot);
+        const playerForward = state._playerForward || new THREE.Vector3(0, 0, -1);
 
         for (const [id, p] of remotePlayers.players) {
-            const dx = p.group.position.x - playerPos.x;
-            const dz = p.group.position.z - playerPos.z;
-            const dist = Math.sqrt(dx * dx + dz * dz);
+            const diff = p.group.position.clone().sub(playerPos);
+            const dist = diff.length();
 
             if (dist > ATTACK_RANGE) continue;
 
             if (dist > 0.01) {
-                const ndx = dx / dist;
-                const ndz = dz / dist;
-                const dot = fwdX * ndx + fwdZ * ndz;
+                const ndir = diff.normalize();
+                const dot = playerForward.dot(ndir);
                 if (dot < Math.cos(ATTACK_ARC / 2)) continue;
             }
 
@@ -165,35 +146,40 @@ export default class CombatSystem {
 
         entity.userData.hp -= damage;
 
-        // Flash red
         this._flashEntity(entity, 0xff0000, 0.2);
 
-        // Knockback away from player
-        const dx = entity.position.x - state.player.pos.x;
-        const dz = entity.position.z - state.player.pos.z;
-        const dist = Math.sqrt(dx * dx + dz * dz) || 1;
-        entity.position.x += (dx / dist) * 0.8;
-        entity.position.z += (dz / dist) * 0.8;
+        // 3D knockback away from player
+        const dir = entity.position.clone().sub(state.player.pos).normalize();
+        const planet = entity.userData.planet;
+        if (planet) {
+            const newPos = SphericalUtils.moveOnSurface(entity.position, dir, 0.8, planet);
+            entity.position.copy(newPos);
+        } else {
+            entity.position.add(dir.multiplyScalar(0.8));
+        }
 
-        // Set aggro
         entity.userData.aggroTimer = CREATURE_AGGRO_DURATION;
 
-        // Hit particles
         for (let i = 0; i < 6; i++) {
             factory.createParticle(entity.position.clone(), entity.userData.color || new THREE.Color(0xff0000), 0.8);
         }
 
-        // Death check
         if (entity.userData.hp <= 0) {
             audio.die();
             for (let i = 0; i < 20; i++) {
                 factory.createParticle(entity.position.clone(), entity.userData.color || new THREE.Color(0xff0000), 1.5);
             }
 
-            // Spawn essence drop based on creature species
             const essenceData = CREATURE_ESSENCE_MAP[entity.userData.speciesType];
             if (essenceData) {
                 const boost = factory.createStatBoost(entity.position.x, entity.position.z, essenceData);
+                boost.userData.planet = entity.userData.planet;
+                // Snap boost to planet surface
+                if (entity.userData.planet) {
+                    const normal = SphericalUtils.getSurfaceNormal(entity.position, entity.userData.planet);
+                    const surfPos = entity.userData.planet.center.clone().add(normal.multiplyScalar(entity.userData.planet.radius + 0.5));
+                    boost.position.copy(surfPos);
+                }
                 world.add(boost);
                 state.statBoosts.push(boost);
             }
@@ -238,25 +224,25 @@ export default class CombatSystem {
         state.player.hp -= amount;
         audio.hurt();
 
-        // Knockback
+        // Knockback along surface
         if (sourcePos) {
             state.player.stunTimer = 0.4;
-            const dx = state.player.pos.x - sourcePos.x;
-            const dz = state.player.pos.z - sourcePos.z;
-            const dist = Math.sqrt(dx * dx + dz * dz) || 1;
+            const dir = state.player.pos.clone().sub(sourcePos).normalize();
             const knockSpeed = 0.4;
-            state.player.vel.x = (dx / dist) * knockSpeed;
-            state.player.vel.z = (dz / dist) * knockSpeed;
-            state.player.vel.y = 0.15; // Small hop
+            state.player.vel.copy(dir.multiplyScalar(knockSpeed));
+            // Add upward component along surface normal
+            const planet = playerController.getCurrentPlanet ? playerController.getCurrentPlanet() : null;
+            if (planet) {
+                const normal = SphericalUtils.getSurfaceNormal(state.player.pos, planet);
+                state.player.vel.add(normal.multiplyScalar(0.15));
+            }
             state.player.onGround = false;
         }
 
-        // Flash player model
         if (playerController && playerController.modelPivot) {
             this._flashEntity(playerController.modelPivot, 0xff0000, 0.2);
         }
 
-        // Red screen flash
         if (this.ui.flash) {
             this.ui.flash.style.background = 'rgba(255, 0, 0, 0.4)';
             this.ui.flash.style.opacity = 1;
@@ -275,21 +261,18 @@ export default class CombatSystem {
     }
 
     _updateCreatureContact(dt, ctx) {
-        const { state, audio } = ctx;
+        const { state } = ctx;
         const playerPos = state.player.pos;
 
         for (const e of state.entities) {
             if (e.userData.type !== 'creature') continue;
             if (e.userData.aggroTimer <= 0) continue;
 
-            // Contact cooldown
             e.userData.contactCooldown = (e.userData.contactCooldown || 0) - dt;
             if (e.userData.contactCooldown > 0) continue;
 
-            // Distance check
-            const dx = e.position.x - playerPos.x;
-            const dz = e.position.z - playerPos.z;
-            const dist = Math.sqrt(dx * dx + dz * dz);
+            // 3D distance check
+            const dist = e.position.distanceTo(playerPos);
             const contactDist = PLAYER_RADIUS + (e.userData.radius || 0.5);
 
             if (dist < contactDist) {
@@ -299,7 +282,7 @@ export default class CombatSystem {
         }
     }
 
-    _updateCreatureAggro(dt, state) {
+    _updateCreatureAggro(dt, state, ctx) {
         const playerPos = state.player.pos;
 
         for (const e of state.entities) {
@@ -308,15 +291,22 @@ export default class CombatSystem {
 
             e.userData.aggroTimer -= dt;
 
-            // Chase player at 2x moveSpeed
-            const dx = playerPos.x - e.position.x;
-            const dz = playerPos.z - e.position.z;
-            const dist = Math.sqrt(dx * dx + dz * dz);
+            // Chase player on sphere surface
+            const dist = e.position.distanceTo(playerPos);
             if (dist > 0.5) {
+                const dir = playerPos.clone().sub(e.position).normalize();
                 const speed = (e.userData.moveSpeed || 0.03) * 2;
-                e.position.x += (dx / dist) * speed;
-                e.position.z += (dz / dist) * speed;
-                e.lookAt(new THREE.Vector3(playerPos.x, e.position.y, playerPos.z));
+                const planet = e.userData.planet;
+                if (planet) {
+                    const newPos = SphericalUtils.moveOnSurface(e.position, dir, speed, planet);
+                    e.position.copy(newPos);
+                    // Orient toward player on surface
+                    const normal = SphericalUtils.getSurfaceNormal(e.position, planet);
+                    const q = SphericalUtils.getOrientationOnSurface(normal, dir);
+                    e.quaternion.slerp(q, 0.15);
+                } else {
+                    e.position.add(dir.multiplyScalar(speed));
+                }
             }
         }
     }
@@ -327,10 +317,12 @@ export default class CombatSystem {
             state.isDead = false;
             state.player.hp = state.player.maxHp;
             state.invincibleTimer = RESPAWN_INVINCIBILITY;
-            // Respawn at island 1 center
+            // Respawn on first planet surface
             if (state.islands.length > 0) {
                 const spawn = state.islands[0];
-                state.player.pos.set(spawn.center.x, spawn.floorY + 2, spawn.center.z);
+                const normal = new THREE.Vector3(0, 1, 0); // top of planet
+                const surfacePos = spawn.center.clone().add(normal.multiplyScalar(spawn.radius + 2));
+                state.player.pos.copy(surfacePos);
                 state.player.vel.set(0, 0, 0);
             }
         }
@@ -342,25 +334,20 @@ export default class CombatSystem {
         for (let i = state.statBoosts.length - 1; i >= 0; i--) {
             const boost = state.statBoosts[i];
 
-            // Pop-in scale animation
             if (boost.scale.x < 0.99) {
                 boost.scale.lerp(new THREE.Vector3(1, 1, 1), 0.05);
             }
 
-            // Bob and spin animation
             const crystal = boost.userData.crystal;
             if (crystal) {
                 crystal.position.y = 0.3 + Math.sin(t * STAT_BOOST_BOB_SPEED) * STAT_BOOST_BOB_HEIGHT;
                 crystal.rotation.y += STAT_BOOST_SPIN_SPEED * dt;
             }
 
-            // Proximity pickup
-            const dx = boost.position.x - playerPos.x;
-            const dz = boost.position.z - playerPos.z;
-            const dist = Math.sqrt(dx * dx + dz * dz);
+            // 3D proximity pickup
+            const dist = boost.position.distanceTo(playerPos);
 
             if (dist < STAT_BOOST_PICKUP_RANGE) {
-                // Apply stat
                 const stat = boost.userData.stat;
                 const amount = boost.userData.amount;
                 if (stat === 'attack') {
@@ -372,13 +359,11 @@ export default class CombatSystem {
                     state.player.hp = Math.min(state.player.hp + amount, state.player.maxHp);
                 }
 
-                // Pickup particles
                 for (let j = 0; j < 15; j++) {
                     factory.createParticle(boost.position.clone(), boost.userData.color, 1.2);
                 }
                 audio.pickup();
 
-                // Remove
                 world.remove(boost);
                 state.statBoosts.splice(i, 1);
             }
@@ -394,7 +379,6 @@ export default class CombatSystem {
         if (hpFill) {
             const pct = (state.player.hp / state.player.maxHp) * 100;
             hpFill.style.width = pct + '%';
-            // Color: green > yellow > red
             if (pct > 50) hpFill.style.background = '#44ff44';
             else if (pct > 25) hpFill.style.background = '#ffcc00';
             else hpFill.style.background = '#ff4444';
@@ -403,7 +387,6 @@ export default class CombatSystem {
             hpText.textContent = state.player.hp + ' / ' + state.player.maxHp;
         }
 
-        // Invincibility flash on HP bar
         if (hpBar) {
             if (state.invincibleTimer > 0) {
                 hpBar.style.opacity = Math.sin(state.invincibleTimer * 16) > 0 ? '1' : '0.3';
@@ -412,7 +395,6 @@ export default class CombatSystem {
             }
         }
 
-        // Death screen
         if (deathScreen) {
             deathScreen.style.display = state.isDead ? 'flex' : 'none';
         }

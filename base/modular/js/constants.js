@@ -18,7 +18,7 @@ export const CAMERA_MAX_Y = 1.4;
 
 // Rendering
 export const RENDER_SCALE = 0.5;
-export const GROUND_LEVEL = -1.4; // O_Y
+export const GROUND_LEVEL = -1.4; // O_Y (legacy, used for reference)
 
 // Interaction
 export const CHOP_HITS = 5;
@@ -32,10 +32,26 @@ export const RAYCAST_RANGE = 8.0;      // click interaction distance
 export const PLACE_RANGE = 12.0;       // placement distance
 export const WATER_PLACE_RANGE = 15.0; // log placement on water distance
 
-// Boat
-export const BOAT_MAX_SPEED = 0.12; // Legacy, kept for reference
-export const BOAT_ACCELERATION = 0.003; // Legacy
-export const BOAT_BRAKE = 0.004; // Legacy
+// Spaceship (replaces Boat)
+export const SHIP_MAX_SPEED = 0.25;
+export const SHIP_ACCELERATION = 0.005;
+export const SHIP_BRAKE = 0.006;
+export const SHIP_REVERSE_FACTOR = 0.3;
+export const SHIP_DRAG = 0.985;
+export const SHIP_MIN_SPEED = 0.001;
+export const SHIP_COLLISION_RADIUS = 3.0;
+export const SHIP_PROXIMITY_RANGE = 6.0;
+export const SHIP_LOG_CLUSTER_SIZE = 4;
+export const SHIP_LOG_CLUSTER_RADIUS = 5.0;
+export const SHIP_DECK_Y_OFFSET = 0.0;
+export const SHIP_PLAYER_Y_OFFSET = 0.1;
+export const SHIP_PITCH_SPEED = 0.015;
+export const SHIP_YAW_SPEED = 0.02;
+
+// Boat (legacy, kept for BoatSystem compatibility)
+export const BOAT_MAX_SPEED = 0.12;
+export const BOAT_ACCELERATION = 0.003;
+export const BOAT_BRAKE = 0.004;
 export const BOAT_REVERSE_FACTOR = 0.3;
 export const BOAT_DRAG = 0.985;
 export const BOAT_MIN_SPEED = 0.001;
@@ -92,28 +108,23 @@ export const PARTICLE_FADE_RATE = 0.03;
 export const DEBRIS_GRAVITY = 0.01;
 export const DEBRIS_SHRINK_RATE = 0.98;
 export const DEBRIS_MIN_SCALE = 0.01;
-export const DEBRIS_MIN_Y = -20;
-
-// Clouds
-export const CLOUD_COUNT = 40;
-export const CLOUD_SPREAD = 300;
-export const CLOUD_MIN_Y = 15;
-export const CLOUD_MAX_Y = 30;
-export const CLOUD_MIN_SPEED = 0.5;
-export const CLOUD_MAX_SPEED = 1.5;
-export const CLOUD_WRAP_DISTANCE = 200;
+export const DEBRIS_MIN_Y = -200;  // Increased for space (no ocean floor)
 
 // Mining drops
 export const MINE_DROP_COUNT = 3;
 
-// Island definitions
-export const ISLANDS = [
-    { name: "STARTING SHORE", x: 0, z: 0, radius: 12, hasWater: true, palette: null },
-    { name: "FLORA HAVEN", x: 80, z: 0, radius: 14, hasWater: false, palette: null },
-    { name: "ANCIENT PEAKS", x: 0, z: 110, radius: 28, hasWater: false, palette: 'blue' },
-    { name: "ROCKY OUTPOST", x: -90, z: -50, radius: 11, hasWater: false, palette: null },
-    { name: "DISTANT SHORES", x: 50, z: -100, radius: 13, hasWater: false, palette: null }
+// Planet definitions (replaces ISLANDS)
+// Each planet is a sphere in 3D space with a radius
+export const PLANETS = [
+    { name: "STARTING PLANET", x: 0, y: 0, z: 0, radius: 15, hasAtmosphere: true, palette: null },
+    { name: "FLORA WORLD", x: 100, y: 30, z: 0, radius: 18, hasAtmosphere: false, palette: null },
+    { name: "ANCIENT PEAKS", x: 0, y: -20, z: 140, radius: 30, hasAtmosphere: false, palette: 'blue' },
+    { name: "ROCKY OUTPOST", x: -110, y: 40, z: -60, radius: 14, hasAtmosphere: false, palette: null },
+    { name: "DISTANT WORLD", x: 60, y: -50, z: -120, radius: 16, hasAtmosphere: false, palette: null }
 ];
+
+// Legacy island definitions (kept for reference)
+export const ISLANDS = PLANETS;
 
 // Mouse/Controls
 export const SENSITIVITY = 0.002;
@@ -151,3 +162,8 @@ export const CREATURE_ESSENCE_MAP = {
     blocky:   { stat: 'health', amount: 3 }
 };
 export const ATTACK_SWING_DURATION = 0.4;
+
+// Space environment
+export const STAR_COUNT = 2000;
+export const STAR_SPREAD = 800;
+export const SPACE_FOG_COLOR = 0x020208;

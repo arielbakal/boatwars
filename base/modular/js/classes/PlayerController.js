@@ -1,9 +1,9 @@
 // =====================================================
-// PLAYER CONTROLLER - THIRD PERSON CHARACTER
+// PLAYER CONTROLLER - Spherical Planet Movement + Camera
 // =====================================================
 
 import { CAMERA_MIN_Y, CAMERA_MAX_Y } from '../constants.js';
-
+import SphericalUtils from './SphericalUtils.js';
 
 export default class PlayerController {
     constructor(world, state) {
@@ -11,41 +11,39 @@ export default class PlayerController {
         this.state = state;
         this.playerGroup = null;
         this.modelPivot = null;
-        // Limb refs for animation
         this.legL = null;
         this.legR = null;
         this.armL = null;
         this.armR = null;
         this.time = 0;
-        this.chopAnimState = null; // set by ChopSystem: { isSwinging, swingProgress }
+        this.chopAnimState = null;
+
+        // Spherical world state
+        this._surfaceNormal = new THREE.Vector3(0, 1, 0); // Current "up" direction
+        this._surfaceForward = new THREE.Vector3(0, 0, 1); // Current tangent forward
+        this._surfaceRight = new THREE.Vector3(1, 0, 0); // Current tangent right
+        this._currentPlanet = null;
     }
 
     createModel(palette) {
-        // Root group — positioned at player world position
         this.playerGroup = new THREE.Group();
-
-        // Pivot — rotates to face movement direction
         this.modelPivot = new THREE.Group();
         this.modelPivot.scale.setScalar(0.6);
         this.playerGroup.add(this.modelPivot);
 
-        // Materials from palette (ties character to world DNA)
         const matBody = this.world.getMat(palette.creature);
         const matLimb = this.world.getMat(palette.flora);
         const matEye = new THREE.MeshBasicMaterial({ color: 0xffffff });
         const matPupil = new THREE.MeshBasicMaterial({ color: 0x000000 });
 
-        // Torso (origin at feet)
         const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.3), matBody);
         torso.position.y = 0.7;
         this.modelPivot.add(torso);
 
-        // Head
         const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.35, 0.4), matLimb);
         head.position.y = 1.2;
         this.modelPivot.add(head);
 
-        // Eyes (face +Z)
         const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.05), matEye);
         eyeL.position.set(0.12, 1.2, 0.2);
         const eyeR = eyeL.clone();
@@ -58,7 +56,6 @@ export default class PlayerController {
         eyeR.add(pupilR);
         this.modelPivot.add(eyeL, eyeR);
 
-        // Legs — pivot at top
         const legGeo = new THREE.BoxGeometry(0.15, 0.4, 0.15);
         legGeo.translate(0, -0.2, 0);
         this.legL = new THREE.Mesh(legGeo, matLimb);
@@ -67,7 +64,6 @@ export default class PlayerController {
         this.legR.position.set(-0.15, 0.4, 0);
         this.modelPivot.add(this.legL, this.legR);
 
-        // Arms — pivot at top
         const armGeo = new THREE.BoxGeometry(0.12, 0.4, 0.12);
         armGeo.translate(0, -0.2, 0);
         this.armL = new THREE.Mesh(armGeo, matLimb);
@@ -76,7 +72,6 @@ export default class PlayerController {
         this.armR.position.set(-0.35, 0.9, 0);
         this.modelPivot.add(this.armL, this.armR);
 
-        // Hand anchor points for holding items
         this.handAnchorL = new THREE.Group();
         this.handAnchorL.position.set(0, -0.4, 0);
         this.armL.add(this.handAnchorL);
@@ -86,7 +81,6 @@ export default class PlayerController {
         this.armR.add(this.handAnchorR);
 
         this.heldItem = null;
-
         this.world.add(this.playerGroup);
     }
 
@@ -102,6 +96,31 @@ export default class PlayerController {
         }
     }
 
+    /**
+     * Compute surface frame (normal, forward, right) for the nearest planet.
+     */
+    _updateSurfaceFrame(planets) {
+        const player = this.state.player;
+        const result = SphericalUtils.findNearestPlanet(player.pos, planets);
+        if (!result) return;
+
+        this._currentPlanet = result.planet;
+        this._surfaceNormal = SphericalUtils.getSurfaceNormal(player.pos, result.planet);
+
+        // Maintain a consistent forward by projecting the old forward onto the new tangent plane
+        let fwd = this._surfaceForward.clone();
+        fwd.sub(this._surfaceNormal.clone().multiplyScalar(fwd.dot(this._surfaceNormal)));
+        if (fwd.lengthSq() < 0.0001) {
+            fwd = SphericalUtils._getArbitraryTangent(this._surfaceNormal);
+        } else {
+            fwd.normalize();
+        }
+        this._surfaceForward = fwd;
+        this._surfaceRight = new THREE.Vector3().crossVectors(this._surfaceNormal, this._surfaceForward).normalize();
+        // Re-orthogonalize
+        this._surfaceForward = new THREE.Vector3().crossVectors(this._surfaceRight, this._surfaceNormal).normalize();
+    }
+
     update(dt, islands) {
         if (!this.playerGroup) return;
         if (this.state.isDead) return;
@@ -109,204 +128,195 @@ export default class PlayerController {
         const player = state.player;
         this.time += dt;
 
-        // --- Camera-relative movement direction ---
+        // Update surface frame based on nearest planet
+        this._updateSurfaceFrame(islands);
+
+        if (!this._currentPlanet) return;
+        const planet = this._currentPlanet;
+        const up = this._surfaceNormal;
+        const altitude = SphericalUtils.getAltitude(player.pos, planet);
+
+        // --- Camera-relative movement on the sphere surface ---
         const camera = this.world.camera;
+        const ca = player.cameraAngle;
 
-        // Robust Forward Calculation:
-        // Instead of projecting forward vector (unstable at poles), use Right vector cross Up
-        const camRight = new THREE.Vector3();
-        const camUp = new THREE.Vector3(0, 1, 0);
-
-        // Get camera's local X axis (Right) in world space
-        // Note: camera.matrixWorld handles rotation. Column 0 is Right, 1 Up, 2 Back usually.
-        // Safer to just use cross product of forward if not too steep, OR rely on a known Up?
-        // Actually, just projecting camera forward on XZ plane is standard, but let's clamp it.
-        const camFwd = new THREE.Vector3();
-        camera.getWorldDirection(camFwd);
-        camFwd.y = 0;
+        // Compute camera forward/right projected onto the tangent plane
+        const camWorldFwd = new THREE.Vector3();
+        camera.getWorldDirection(camWorldFwd);
+        // Project onto tangent plane
+        let camFwd = camWorldFwd.clone().sub(up.clone().multiplyScalar(camWorldFwd.dot(up)));
         if (camFwd.lengthSq() < 0.001) {
-            // Camera looking straight down/up - fallback to current player forward or default North
-            camFwd.set(0, 0, -1);
+            camFwd = this._surfaceForward.clone();
         } else {
             camFwd.normalize();
         }
+        const camRight = new THREE.Vector3().crossVectors(up, camFwd).negate().normalize();
 
-        camRight.crossVectors(camFwd, camUp).normalize();
-
-        // Corrected movement logic relative to camera
+        // Build movement direction on tangent plane
         const moveDir = new THREE.Vector3(0, 0, 0);
         let isMoving = false;
 
         if (player.stunTimer > 0) {
             player.stunTimer -= dt;
-            // Apply friction to knockback velocity
-            player.vel.x *= 0.9;
-            player.vel.z *= 0.9;
+            // Apply friction to velocity (in world space, tangential component)
+            const velTangent = player.vel.clone().sub(up.clone().multiplyScalar(player.vel.dot(up)));
+            velTangent.multiplyScalar(0.9);
+            const velNormal = up.clone().multiplyScalar(player.vel.dot(up));
+            player.vel.copy(velTangent.add(velNormal));
         } else {
             if (state.inputs.w) moveDir.add(camFwd);
             if (state.inputs.s) moveDir.sub(camFwd);
-            // A moves Left (negative Right)
             if (state.inputs.a) moveDir.sub(camRight);
-            // D moves Right (positive Right)
             if (state.inputs.d) moveDir.add(camRight);
 
-            // Check threshold larger than 0 to avoid jitter
             if (moveDir.lengthSq() > 0.01) {
                 isMoving = true;
                 moveDir.normalize();
 
                 const effectiveSpeed = player.speed + (player.speedBoost || 0);
-                player.vel.x = moveDir.x * effectiveSpeed;
-                player.vel.z = moveDir.z * effectiveSpeed;
+                // Set tangential velocity
+                const velNormalComp = up.clone().multiplyScalar(player.vel.dot(up));
+                player.vel.copy(moveDir.multiplyScalar(effectiveSpeed).add(velNormalComp));
 
-                // Rotation smoothing loop
-                // Calculate target angle
-                const targetAngle = Math.atan2(moveDir.x, moveDir.z);
+                // Compute target rotation relative to surface frame
+                // Project moveDir onto surface frame to get local angle
+                const localX = moveDir.dot(this._surfaceRight);
+                const localZ = moveDir.dot(this._surfaceForward);
+                const targetAngle = Math.atan2(localX, localZ);
 
-                // Shortest path interpolation for angle
                 let angleDiff = targetAngle - player.targetRotation;
-                // Normalize to -PI..PI
                 while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
                 while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-
-                // Add smoothed diff
-                player.targetRotation += angleDiff * 0.2; // Smooth snapping
+                player.targetRotation += angleDiff * 0.2;
             } else {
-                player.vel.x *= 0.8;
-                player.vel.z *= 0.8;
+                // Apply friction to tangential velocity
+                const velNormal = up.clone().multiplyScalar(player.vel.dot(up));
+                const velTangent = player.vel.clone().sub(velNormal);
+                velTangent.multiplyScalar(0.8);
+                player.vel.copy(velTangent.add(velNormal));
             }
         }
 
-        // Gravity
-        player.vel.y -= 0.015;
+        // Gravity: accelerate toward planet center (along -up direction)
+        const gravityAccel = up.clone().multiplyScalar(-0.015);
+        player.vel.add(gravityAccel);
 
-        // Apply velocity (Temporarily)
+        // Apply velocity
         const nextPos = player.pos.clone().add(player.vel);
 
-        // --- Multi-island ground & boundary collision ---
+        // Ground collision: check distance from planet center
+        const distFromCenter = nextPos.distanceTo(planet.center);
+        const surfaceDist = distFromCenter - planet.radius;
+
         let onAnyIsland = false;
-        let activeIsland = null;
 
-        // First find which island we are most likely on or over
-        for (const island of islands) {
-            const dx = nextPos.x - island.center.x;
-            const dz = nextPos.z - island.center.z;
-            const distSq = dx * dx + dz * dz;
-            // Check broadly if we are within this island's influence (radius + small buffer)
-            if (distSq < (island.radius * 1.5) ** 2) {
-                activeIsland = island;
-                break;
-            }
-        }
-
-        if (activeIsland) {
-            const dx = nextPos.x - activeIsland.center.x;
-            const dz = nextPos.z - activeIsland.center.z;
-            const dist = Math.sqrt(dx * dx + dz * dz);
-
-            // 1. Boundary Check: Prevent walking off
-            if (dist > activeIsland.radius - 0.5) {
-                const angle = Math.atan2(dz, dx);
-                nextPos.x = activeIsland.center.x + Math.cos(angle) * (activeIsland.radius - 0.5);
-                nextPos.z = activeIsland.center.z + Math.sin(angle) * (activeIsland.radius - 0.5);
-                player.vel.x = 0;
-                player.vel.z = 0;
-            }
-
-            // 2. Floor collision
-            if (nextPos.y < activeIsland.floorY) {
-                nextPos.y = activeIsland.floorY;
-                player.vel.y = 0;
+        // Check if within planet's gravity well (radius * 2)
+        if (distFromCenter < planet.radius * 2) {
+            // Ground collision
+            if (surfaceDist < 0.05) {
+                // Snap to surface
+                const normal = nextPos.clone().sub(planet.center).normalize();
+                nextPos.copy(planet.center).add(normal.multiplyScalar(planet.radius + 0.05));
+                // Zero out velocity component toward planet center
+                const velDotUp = player.vel.dot(up);
+                if (velDotUp < 0) {
+                    player.vel.sub(up.clone().multiplyScalar(velDotUp));
+                }
                 player.onGround = true;
                 onAnyIsland = true;
             }
-        } else if (nextPos.y < -15) {
-            // Fallback: only if somehow forced off-island (e.g. initial spawn bug), respawn
-            nextPos.set(islands[0].center.x, islands[0].floorY + 3, islands[0].center.z);
-            player.vel.set(0, 0, 0);
-            onAnyIsland = true; // technically on safe ground now
         }
 
-        // Apply validated position
+        // Fallback: if too far from any planet, respawn
+        if (!onAnyIsland && surfaceDist > 100) {
+            const spawn = islands[0];
+            const spawnNormal = new THREE.Vector3(0, 1, 0);
+            nextPos.copy(spawn.center).add(spawnNormal.multiplyScalar(spawn.radius + 3));
+            player.vel.set(0, 0, 0);
+            onAnyIsland = true;
+        }
+
         player.pos.copy(nextPos);
 
-        // --- Obstacle Collision (Simple circle push-out + Mountain Climbing) ---
+        // --- Obstacle Collision ---
         const playerRadius = 0.4;
         let groundHeightOverride = null;
 
         for (const obs of state.obstacles) {
-            // Mountain Climbing Logic
             if (obs.userData.isMountain) {
-                const dx = player.pos.x - obs.position.x;
-                const dz = player.pos.z - obs.position.z;
-                const dist = Math.sqrt(dx * dx + dz * dz);
+                const dist3D = player.pos.distanceTo(obs.position);
                 const maxR = obs.userData.mountRadius;
-                if (dist < maxR) {
-                    // Simple linear cone height approximation
-                    // height at center = mountHeight + base_y
-                    // height at edge = base_y
-                    // y = base_y + mountHeight * (1 - dist/maxR)
-                    // base_y is usually -1.4 (O_Y)
-                    const base_y = -1.4;
-                    const h = base_y + obs.userData.mountHeight * (1 - dist / maxR);
-
-                    // If we are above (or slightly below) the mountain surface, snap to it
-                    // Check if player is somewhat near the surface to snap
-                    if (player.pos.y > h - 1.0) {
-                        groundHeightOverride = h;
+                if (dist3D < maxR) {
+                    const surfNorm = SphericalUtils.getSurfaceNormal(obs.position, planet);
+                    const obsSurfacePos = planet.center.clone().add(surfNorm.clone().multiplyScalar(planet.radius));
+                    // Distance along surface approximation
+                    const arcDist = player.pos.distanceTo(obsSurfacePos);
+                    if (arcDist < maxR) {
+                        const h = obs.userData.mountHeight * (1 - arcDist / maxR);
+                        const climbAlt = planet.radius + h;
+                        const currentAlt = player.pos.distanceTo(planet.center);
+                        if (currentAlt < climbAlt + 1.0) {
+                            groundHeightOverride = climbAlt;
+                        }
                     }
                 }
-                continue; // Don't process as a wall
+                continue;
             }
 
             if (!obs.userData.radius) continue;
-            const dx = player.pos.x - obs.position.x;
-            const dz = player.pos.z - obs.position.z;
-            const distSq = dx * dx + dz * dz;
+            const dist = player.pos.distanceTo(obs.position);
             const minDist = playerRadius + obs.userData.radius;
-            if (distSq < minDist * minDist) {
-                const dist = Math.sqrt(distSq);
+            if (dist < minDist && dist > 0.001) {
+                const pushDir = player.pos.clone().sub(obs.position).normalize();
                 const overlap = minDist - dist;
-                if (dist > 0.001) {
-                    const pushX = (dx / dist) * overlap;
-                    const pushZ = (dz / dist) * overlap;
-                    player.pos.x += pushX;
-                    player.pos.z += pushZ;
-                }
+                player.pos.add(pushDir.multiplyScalar(overlap));
             }
         }
 
-        // Apply mountain height if active
+        // Apply mountain height override
         if (groundHeightOverride !== null) {
-            // Only snap if we are falling or walking on it
-            if (player.pos.y < groundHeightOverride + 0.5) {
-                player.pos.y = groundHeightOverride;
-                player.vel.y = 0;
+            const currentDist = player.pos.distanceTo(planet.center);
+            if (currentDist < groundHeightOverride + 0.5) {
+                const normal = player.pos.clone().sub(planet.center).normalize();
+                player.pos.copy(planet.center).add(normal.multiplyScalar(groundHeightOverride));
+                // Zero radial velocity
+                const velDotUp2 = player.vel.dot(normal);
+                if (velDotUp2 < 0) {
+                    player.vel.sub(normal.clone().multiplyScalar(velDotUp2));
+                }
                 player.onGround = true;
-                // Update playerGroup immediately to avoid jitter
                 this.playerGroup.position.copy(player.pos);
             }
         }
 
-        // Jump
+        // Jump - along surface normal
         if (player.onGround && state.inputs.space) {
-            player.vel.y = 0.2;
+            player.vel.add(up.clone().multiplyScalar(0.2));
             player.onGround = false;
         }
 
-        // If falling, mark not on ground
-        if (player.vel.y < -0.001) {
+        if (player.vel.dot(up) < -0.001) {
             player.onGround = false;
         }
 
         // --- Update mesh position ---
         this.playerGroup.position.copy(player.pos);
 
-        // --- Smooth rotation ---
+        // --- Orient player group so its Y-up aligns with surface normal ---
+        const surfNormal = SphericalUtils.getSurfaceNormal(player.pos, planet);
+        // Build orientation: up = surfNormal, forward based on player targetRotation
+        const localForward = this._surfaceForward.clone()
+            .multiplyScalar(Math.cos(player.targetRotation))
+            .add(this._surfaceRight.clone().multiplyScalar(Math.sin(player.targetRotation)));
+
+        const orientQ = SphericalUtils.getOrientationOnSurface(surfNormal, localForward);
+        this.playerGroup.quaternion.slerp(orientQ, 0.15);
+
+        // --- Model pivot rotation (local facing direction within the group) ---
         if (isMoving) {
             const targetQ = new THREE.Quaternion();
             targetQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), player.targetRotation);
-            this.modelPivot.quaternion.slerp(targetQ, 0.2); // Snap faster if input is reliable
+            this.modelPivot.quaternion.slerp(targetQ, 0.2);
         }
 
         // --- Invincibility flash ---
@@ -318,55 +328,39 @@ export default class PlayerController {
 
         // --- Procedural animation ---
         if (state.isAttacking) {
-            // Two-phase attack swing with both arms
-            const swingT = (state._attackVisualTimer || 0) / 0.4; // normalized 0→1
-
+            const swingT = (state._attackVisualTimer || 0) / 0.4;
             let armAngleR, armAngleL;
             if (swingT < 0.4) {
-                // Wind-up: both arms pull back
                 const t = swingT / 0.4;
                 armAngleR = -1.8 * t;
                 armAngleL = -1.4 * t;
             } else if (swingT < 0.8) {
-                // Swing: both arms thrust forward
                 const t = (swingT - 0.4) / 0.4;
-                armAngleR = -1.8 + (1.8 + 1.2) * t;  // -1.8 → 1.2
-                armAngleL = -1.4 + (1.4 + 0.8) * t;  // -1.4 → 0.8
+                armAngleR = -1.8 + (1.8 + 1.2) * t;
+                armAngleL = -1.4 + (1.4 + 0.8) * t;
             } else {
-                // Recovery: lerp back to neutral
                 const t = (swingT - 0.8) / 0.2;
                 armAngleR = 1.2 * (1 - t);
                 armAngleL = 0.8 * (1 - t);
             }
-
             this.armR.rotation.x = armAngleR;
             this.armL.rotation.x = armAngleL;
             this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, 0.15);
             this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, 0.15);
             this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, 0.1);
         } else if (this.chopAnimState) {
-            // Chopping animation — override arms while chopping
             const { isSwinging, swingProgress } = this.chopAnimState;
-
-            // Right arm (holds axe): swing forward on hit, hold raised between hits
             if (isSwinging) {
-                // Swing: arm goes from raised (-1.2 rad) to forward/down (1.0 rad)
-                const t = 1.0 - swingProgress; // 0→1 over swing
-                const swingAngle = -1.2 + t * 2.2; // -1.2 → 1.0
+                const t = 1.0 - swingProgress;
+                const swingAngle = -1.2 + t * 2.2;
                 this.armR.rotation.x = swingAngle;
             } else {
-                // Between hits: hold arm raised (wind-up pose)
                 this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, -1.2, 0.15);
             }
-
-            // Left arm stays relatively still
             this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, -0.3, 0.1);
-
-            // Legs stay still while chopping
             this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, 0.1);
             this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, 0.1);
             this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, 0.1);
-
         } else if (isMoving && player.onGround) {
             const walkCycle = this.time * 10;
             this.legL.rotation.x = Math.sin(walkCycle) * 0.8;
@@ -388,46 +382,63 @@ export default class PlayerController {
         if (!this.playerGroup) return;
         const player = this.state.player;
         const ca = player.cameraAngle;
+        const up = this._surfaceNormal;
 
         // Clamp vertical angle
         if (player.cameraMode !== 'first') {
-            // Restrict for TPS
             ca.y = Math.max(CAMERA_MIN_Y || 0.1, Math.min(CAMERA_MAX_Y || 1.4, ca.y));
         }
 
         if (player.cameraMode === 'first') {
             if (this.modelPivot) this.modelPivot.visible = false;
-            // First person: Camera at eye level
-            camera.position.set(player.pos.x, player.pos.y + 1.6, player.pos.z);
 
-            // ca.x = yaw (horizontal), ca.y = pitch (vertical, positive = up)
-            const lookX = -Math.sin(ca.x) * Math.cos(ca.y);
-            const lookZ = -Math.cos(ca.x) * Math.cos(ca.y);
-            const lookY = Math.sin(ca.y);
+            // First person: camera at player pos + up * 1.6 (scaled)
+            const eyePos = player.pos.clone().add(up.clone().multiplyScalar(1.0));
+            camera.position.copy(eyePos);
 
-            const target = new THREE.Vector3(
-                camera.position.x + lookX,
-                camera.position.y + lookY,
-                camera.position.z + lookZ
-            );
-            camera.lookAt(target);
+            // Look direction relative to surface frame
+            const lookFwd = this._surfaceForward.clone()
+                .multiplyScalar(-Math.cos(ca.y) * Math.cos(ca.x))
+                .add(this._surfaceRight.clone().multiplyScalar(-Math.cos(ca.y) * Math.sin(ca.x)))
+                .add(up.clone().multiplyScalar(Math.sin(ca.y)));
 
-            // Sync player rotation to camera look for movement
-            // Ideally player body rotates with camera in FPS
+            camera.lookAt(eyePos.clone().add(lookFwd));
+            camera.up.copy(up);
             player.targetRotation = ca.x;
-
         } else {
             if (this.modelPivot) this.modelPivot.visible = true;
-            const dist = 5.0;
-            const camX = player.pos.x + dist * Math.sin(ca.x) * Math.cos(ca.y);
-            const camZ = player.pos.z + dist * Math.cos(ca.x) * Math.cos(ca.y);
-            // ca.y is elevation angle [0.1, 1.4]
-            const camY = player.pos.y + dist * Math.sin(ca.y) + 0.8;
 
-            const desiredPos = new THREE.Vector3(camX, camY, camZ);
+            // Third person camera orbiting in the surface frame
+            const dist = 5.0;
+
+            // Camera offset in local surface frame
+            // ca.x = horizontal orbit angle, ca.y = elevation angle
+            const localOffset = new THREE.Vector3();
+            const horizDist = dist * Math.cos(ca.y);
+            const vertDist = dist * Math.sin(ca.y) + 0.8;
+
+            // Compute world offset using surface frame
+            const offset = this._surfaceForward.clone().multiplyScalar(horizDist * Math.cos(ca.x))
+                .add(this._surfaceRight.clone().multiplyScalar(horizDist * Math.sin(ca.x)))
+                .add(up.clone().multiplyScalar(vertDist));
+
+            const desiredPos = player.pos.clone().add(offset);
             camera.position.lerp(desiredPos, 0.1);
-            camera.lookAt(player.pos.x, player.pos.y + 0.8, player.pos.z);
+
+            const lookTarget = player.pos.clone().add(up.clone().multiplyScalar(0.5));
+            camera.lookAt(lookTarget);
+            camera.up.copy(up);
         }
+    }
+
+    /** Get the current surface normal (up direction) */
+    getSurfaceNormal() {
+        return this._surfaceNormal.clone();
+    }
+
+    /** Get the current planet the player is on */
+    getCurrentPlanet() {
+        return this._currentPlanet;
     }
 
     getPosition() {
@@ -438,6 +449,8 @@ export default class PlayerController {
         if (!this.modelPivot) return new THREE.Vector3(0, 0, 1);
         const fwd = new THREE.Vector3(0, 0, 1);
         fwd.applyQuaternion(this.modelPivot.quaternion);
+        // Transform by playerGroup orientation
+        fwd.applyQuaternion(this.playerGroup.quaternion);
         return fwd;
     }
 
