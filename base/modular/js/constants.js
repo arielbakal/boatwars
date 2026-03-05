@@ -7,6 +7,12 @@ export const GRAVITY = 0.015;
 export const JUMP_FORCE = 0.2;
 export const PLAYER_SPEED = 0.12;
 export const PLAYER_RADIUS = 0.4;
+export const PLAYER_SURFACE_HEIGHT = 0.05;  // ground snap height above surface
+export const GRAVITY_REFERENCE_RADIUS = 15; // planet radius at which gravity = GRAVITY
+export const MAX_FALL_SPEED = 0.8;          // terminal velocity
+export const ON_GROUND_THRESHOLD = 0.005;   // vel threshold before onGround goes false
+export const FRICTION_GROUND = 0.8;         // tangential friction when not moving
+export const FRICTION_STUN = 0.9;           // tangential friction during stun
 
 // Camera
 export const CAMERA_FOV = 60;
@@ -18,7 +24,7 @@ export const CAMERA_MAX_Y = 1.4;
 
 // Rendering
 export const RENDER_SCALE = 0.5;
-export const GROUND_LEVEL = -1.4; // O_Y (legacy, used for reference)
+export const GROUND_LEVEL = -1.4; // O_Y (legacy, unused in spherical mode)
 
 // Interaction
 export const CHOP_HITS = 5;

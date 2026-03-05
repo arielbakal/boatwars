@@ -87,6 +87,42 @@ export default class EntityFactory {
         });
     }
 
+    /**
+     * Merge duplicate vertices in a non-indexed BufferGeometry into an indexed one.
+     * Vertices within `tolerance` distance are treated as the same vertex.
+     * This ensures adjacent triangles share edge vertices and stay connected.
+     */
+    mergeVertices(geometry, tolerance = 0.0001) {
+        const pos = geometry.attributes.position;
+        const map = {};          // hash → first-seen index
+        const uniquePos = [];    // unique vertex positions [x,y,z,...]
+        const indexMap = [];     // old index → new index
+        const precisionFactor = Math.round(1 / tolerance);
+
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i);
+            const y = pos.getY(i);
+            const z = pos.getZ(i);
+            const key = `${Math.round(x * precisionFactor)}_${Math.round(y * precisionFactor)}_${Math.round(z * precisionFactor)}`;
+            if (map[key] !== undefined) {
+                indexMap.push(map[key]);
+            } else {
+                const newIdx = uniquePos.length / 3;
+                map[key] = newIdx;
+                uniquePos.push(x, y, z);
+                indexMap.push(newIdx);
+            }
+        }
+
+        const newPos = new Float32Array(uniquePos);
+        const indices = new Uint32Array(indexMap);
+        const newGeo = new THREE.BufferGeometry();
+        newGeo.setAttribute('position', new THREE.BufferAttribute(newPos, 3));
+        newGeo.setIndex(new THREE.BufferAttribute(indices, 1));
+        newGeo.computeVertexNormals();
+        return newGeo;
+    }
+
     distortGeometry(geometry, intensity) {
         const posAttribute = geometry.attributes.position;
         for (let i = 0; i < posAttribute.count; i++) {
@@ -99,6 +135,38 @@ export default class EntityFactory {
         }
         geometry.computeVertexNormals();
         return geometry;
+    }
+
+    /**
+     * Distort geometry radially — push vertices in/out along their normal from center.
+     * Merges duplicate vertices first so adjacent triangles stay connected.
+     * Uses a simple noise-like pattern based on vertex angle for coherent bumps.
+     */
+    distortGeometryRadial(geometry, intensity, seed = 0) {
+        // Merge duplicate vertices so shared edges move together
+        const merged = this.mergeVertices(geometry);
+        const posAttribute = merged.attributes.position;
+        for (let i = 0; i < posAttribute.count; i++) {
+            const x = posAttribute.getX(i);
+            const y = posAttribute.getY(i);
+            const z = posAttribute.getZ(i);
+            const len = Math.sqrt(x * x + y * y + z * z);
+            if (len < 0.001) continue;
+            // Simple coherent noise: use sin/cos of angles for smooth bumps
+            const theta = Math.atan2(z, x);
+            const phi = Math.acos(Math.max(-1, Math.min(1, y / len)));
+            const noise = Math.sin(theta * 5 + seed) * Math.cos(phi * 4 + seed * 0.7) * 0.5
+                        + Math.sin(theta * 8 - seed * 1.3) * Math.sin(phi * 7 + seed * 0.3) * 0.3
+                        + (Math.random() - 0.5) * 0.4;
+            const offset = noise * intensity;
+            const nx = x / len, ny = y / len, nz = z / len;
+            posAttribute.setX(i, x + nx * offset);
+            posAttribute.setY(i, y + ny * offset);
+            posAttribute.setZ(i, z + nz * offset);
+        }
+        posAttribute.needsUpdate = true;
+        merged.computeVertexNormals();
+        return merged;
     }
 
     /**
@@ -132,30 +200,37 @@ export default class EntityFactory {
      */
     createPlanet(palette, cx, cy, cz, radius, hasAtmosphere = false) {
         const g = new THREE.Group();
-        const detail = Math.max(2, Math.min(4, Math.floor(radius / 5)));
+        // Higher detail for smoother spheres: min 4, max 6
+        const detail = Math.max(4, Math.min(6, Math.floor(radius / 4)));
+        const seed = cx * 7 + cy * 13 + cz * 19 + radius; // deterministic per planet
+
+        // Smooth-shaded materials for planet layers (not flat-shaded)
+        const coreMat = new THREE.MeshToonMaterial({ color: palette.baseRock, flatShading: false });
+        const soilMat = new THREE.MeshToonMaterial({ color: palette.soil, flatShading: false });
+        const surfaceMat = new THREE.MeshToonMaterial({ color: palette.groundTop, flatShading: false });
 
         // Core rock layer
-        const coreGeo = new THREE.IcosahedronGeometry(radius * 0.95, detail);
-        this.distortGeometry(coreGeo, radius * 0.03);
-        const core = new THREE.Mesh(coreGeo, this.getMat(palette.baseRock));
+        const coreGeoRaw = new THREE.IcosahedronGeometry(radius * 0.95, detail);
+        const coreGeo = this.distortGeometryRadial(coreGeoRaw, radius * 0.04, seed + 1);
+        const core = new THREE.Mesh(coreGeo, coreMat);
         g.add(core);
 
         // Soil layer
-        const soilGeo = new THREE.IcosahedronGeometry(radius * 0.98, detail);
-        this.distortGeometry(soilGeo, radius * 0.02);
-        const soil = new THREE.Mesh(soilGeo, this.getMat(palette.soil));
+        const soilGeoRaw = new THREE.IcosahedronGeometry(radius * 0.98, detail);
+        const soilGeo = this.distortGeometryRadial(soilGeoRaw, radius * 0.03, seed + 2);
+        const soil = new THREE.Mesh(soilGeo, soilMat);
         g.add(soil);
 
         // Surface (grass) layer - the main collision surface
-        const surfaceGeo = new THREE.IcosahedronGeometry(radius, detail);
-        this.distortGeometry(surfaceGeo, radius * 0.015);
-        const surface = new THREE.Mesh(surfaceGeo, this.getMat(palette.groundTop));
+        const surfaceGeoRaw = new THREE.IcosahedronGeometry(radius, detail);
+        const surfaceGeo = this.distortGeometryRadial(surfaceGeoRaw, radius * 0.02, seed + 3);
+        const surface = new THREE.Mesh(surfaceGeo, surfaceMat);
         surface.userData = { type: 'ground' };
         g.add(surface);
 
         // Atmosphere glow
         if (hasAtmosphere) {
-            const atmosGeo = new THREE.IcosahedronGeometry(radius * 1.08, detail);
+            const atmosGeo = new THREE.IcosahedronGeometry(radius * 1.08, detail + 1);
             const atmosMat = new THREE.MeshBasicMaterial({
                 color: palette.background.clone().lerp(new THREE.Color(0x4488ff), 0.5),
                 transparent: true,

@@ -2,7 +2,12 @@
 // PLAYER CONTROLLER - Spherical Planet Movement + Camera
 // =====================================================
 
-import { CAMERA_MIN_Y, CAMERA_MAX_Y } from '../constants.js';
+import {
+    CAMERA_MIN_Y, CAMERA_MAX_Y, CAMERA_DISTANCE, CAMERA_LERP,
+    GRAVITY, JUMP_FORCE, PLAYER_RADIUS, PLAYER_SURFACE_HEIGHT,
+    GRAVITY_REFERENCE_RADIUS, MAX_FALL_SPEED, ON_GROUND_THRESHOLD,
+    FRICTION_GROUND, FRICTION_STUN
+} from '../constants.js';
 import SphericalUtils from './SphericalUtils.js';
 
 export default class PlayerController {
@@ -160,7 +165,7 @@ export default class PlayerController {
             player.stunTimer -= dt;
             // Apply friction to velocity (in world space, tangential component)
             const velTangent = player.vel.clone().sub(up.clone().multiplyScalar(player.vel.dot(up)));
-            velTangent.multiplyScalar(0.9);
+            velTangent.multiplyScalar(FRICTION_STUN);
             const velNormal = up.clone().multiplyScalar(player.vel.dot(up));
             player.vel.copy(velTangent.add(velNormal));
         } else {
@@ -174,12 +179,11 @@ export default class PlayerController {
                 moveDir.normalize();
 
                 const effectiveSpeed = player.speed + (player.speedBoost || 0);
-                // Set tangential velocity
+                // Set tangential velocity, preserve radial component
                 const velNormalComp = up.clone().multiplyScalar(player.vel.dot(up));
                 player.vel.copy(moveDir.multiplyScalar(effectiveSpeed).add(velNormalComp));
 
                 // Compute target rotation relative to surface frame
-                // Project moveDir onto surface frame to get local angle
                 const localX = moveDir.dot(this._surfaceRight);
                 const localZ = moveDir.dot(this._surfaceForward);
                 const targetAngle = Math.atan2(localX, localZ);
@@ -192,14 +196,21 @@ export default class PlayerController {
                 // Apply friction to tangential velocity
                 const velNormal = up.clone().multiplyScalar(player.vel.dot(up));
                 const velTangent = player.vel.clone().sub(velNormal);
-                velTangent.multiplyScalar(0.8);
+                velTangent.multiplyScalar(FRICTION_GROUND);
                 player.vel.copy(velTangent.add(velNormal));
             }
         }
 
-        // Gravity: accelerate toward planet center (along -up direction)
-        const gravityAccel = up.clone().multiplyScalar(-0.015);
+        // Gravity: scale by planet radius (larger planet = stronger gravity)
+        const gravityStrength = GRAVITY * (planet.radius / GRAVITY_REFERENCE_RADIUS);
+        const gravityAccel = up.clone().multiplyScalar(-gravityStrength);
         player.vel.add(gravityAccel);
+
+        // Terminal velocity cap (prevent infinite fall speed)
+        const radialSpeed = player.vel.dot(up);
+        if (radialSpeed < -MAX_FALL_SPEED) {
+            player.vel.sub(up.clone().multiplyScalar(radialSpeed + MAX_FALL_SPEED));
+        }
 
         // Apply velocity
         const nextPos = player.pos.clone().add(player.vel);
@@ -213,10 +224,10 @@ export default class PlayerController {
         // Check if within planet's gravity well (radius * 2)
         if (distFromCenter < planet.radius * 2) {
             // Ground collision
-            if (surfaceDist < 0.05) {
+            if (surfaceDist < PLAYER_SURFACE_HEIGHT) {
                 // Snap to surface
                 const normal = nextPos.clone().sub(planet.center).normalize();
-                nextPos.copy(planet.center).add(normal.multiplyScalar(planet.radius + 0.05));
+                nextPos.copy(planet.center).add(normal.multiplyScalar(planet.radius + PLAYER_SURFACE_HEIGHT));
                 // Zero out velocity component toward planet center
                 const velDotUp = player.vel.dot(up);
                 if (velDotUp < 0) {
@@ -227,10 +238,12 @@ export default class PlayerController {
             }
         }
 
-        // Fallback: if too far from any planet, respawn
+        // Fallback: if too far from any planet, respawn on nearest planet
         if (!onAnyIsland && surfaceDist > 100) {
-            const spawn = islands[0];
-            const spawnNormal = new THREE.Vector3(0, 1, 0);
+            const nearest = SphericalUtils.findNearestPlanet(nextPos, islands);
+            const spawn = nearest ? nearest.planet : islands[0];
+            const spawnNormal = nextPos.clone().sub(spawn.center).normalize();
+            if (spawnNormal.lengthSq() < 0.001) spawnNormal.set(0, 1, 0);
             nextPos.copy(spawn.center).add(spawnNormal.multiplyScalar(spawn.radius + 3));
             player.vel.set(0, 0, 0);
             onAnyIsland = true;
@@ -239,7 +252,6 @@ export default class PlayerController {
         player.pos.copy(nextPos);
 
         // --- Obstacle Collision ---
-        const playerRadius = 0.4;
         let groundHeightOverride = null;
 
         for (const obs of state.obstacles) {
@@ -265,7 +277,7 @@ export default class PlayerController {
 
             if (!obs.userData.radius) continue;
             const dist = player.pos.distanceTo(obs.position);
-            const minDist = playerRadius + obs.userData.radius;
+            const minDist = PLAYER_RADIUS + obs.userData.radius;
             if (dist < minDist && dist > 0.001) {
                 const pushDir = player.pos.clone().sub(obs.position).normalize();
                 const overlap = minDist - dist;
@@ -291,33 +303,30 @@ export default class PlayerController {
 
         // Jump - along surface normal
         if (player.onGround && state.inputs.space) {
-            player.vel.add(up.clone().multiplyScalar(0.2));
+            player.vel.add(up.clone().multiplyScalar(JUMP_FORCE));
             player.onGround = false;
         }
 
-        if (player.vel.dot(up) < -0.001) {
+        // Only lose onGround when actually falling with meaningful downward speed
+        if (player.onGround && player.vel.dot(up) < -ON_GROUND_THRESHOLD) {
             player.onGround = false;
         }
 
         // --- Update mesh position ---
         this.playerGroup.position.copy(player.pos);
 
-        // --- Orient player group so its Y-up aligns with surface normal ---
+        // --- Orient player group: align Y-up with surface normal only ---
+        // Use a stable surface frame reference (NOT targetRotation) to avoid double rotation
         const surfNormal = SphericalUtils.getSurfaceNormal(player.pos, planet);
-        // Build orientation: up = surfNormal, forward based on player targetRotation
-        const localForward = this._surfaceForward.clone()
-            .multiplyScalar(Math.cos(player.targetRotation))
-            .add(this._surfaceRight.clone().multiplyScalar(Math.sin(player.targetRotation)));
-
-        const orientQ = SphericalUtils.getOrientationOnSurface(surfNormal, localForward);
+        const orientQ = SphericalUtils.getOrientationOnSurface(surfNormal, this._surfaceForward);
         this.playerGroup.quaternion.slerp(orientQ, 0.15);
 
-        // --- Model pivot rotation (local facing direction within the group) ---
-        if (isMoving) {
-            const targetQ = new THREE.Quaternion();
-            targetQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), player.targetRotation);
-            this.modelPivot.quaternion.slerp(targetQ, 0.2);
-        }
+        // --- Model pivot rotation: facing direction within the playerGroup's local frame ---
+        // targetRotation is the angle relative to _surfaceForward, which matches
+        // the playerGroup's local Z axis, so a local Y rotation by targetRotation is correct.
+        const targetQ = new THREE.Quaternion();
+        targetQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), player.targetRotation);
+        this.modelPivot.quaternion.slerp(targetQ, isMoving ? 0.2 : 0.1);
 
         // --- Invincibility flash ---
         if (state.invincibleTimer > 0 && this.modelPivot) {
@@ -386,13 +395,13 @@ export default class PlayerController {
 
         // Clamp vertical angle
         if (player.cameraMode !== 'first') {
-            ca.y = Math.max(CAMERA_MIN_Y || 0.1, Math.min(CAMERA_MAX_Y || 1.4, ca.y));
+            ca.y = Math.max(CAMERA_MIN_Y, Math.min(CAMERA_MAX_Y, ca.y));
         }
 
         if (player.cameraMode === 'first') {
             if (this.modelPivot) this.modelPivot.visible = false;
 
-            // First person: camera at player pos + up * 1.6 (scaled)
+            // First person: camera at player pos + up * eye height
             const eyePos = player.pos.clone().add(up.clone().multiplyScalar(1.0));
             camera.position.copy(eyePos);
 
@@ -409,11 +418,9 @@ export default class PlayerController {
             if (this.modelPivot) this.modelPivot.visible = true;
 
             // Third person camera orbiting in the surface frame
-            const dist = 5.0;
+            const dist = CAMERA_DISTANCE;
 
-            // Camera offset in local surface frame
             // ca.x = horizontal orbit angle, ca.y = elevation angle
-            const localOffset = new THREE.Vector3();
             const horizDist = dist * Math.cos(ca.y);
             const vertDist = dist * Math.sin(ca.y) + 0.8;
 
@@ -423,7 +430,7 @@ export default class PlayerController {
                 .add(up.clone().multiplyScalar(vertDist));
 
             const desiredPos = player.pos.clone().add(offset);
-            camera.position.lerp(desiredPos, 0.1);
+            camera.position.lerp(desiredPos, CAMERA_LERP);
 
             const lookTarget = player.pos.clone().add(up.clone().multiplyScalar(0.5));
             camera.lookAt(lookTarget);

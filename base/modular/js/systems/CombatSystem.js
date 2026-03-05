@@ -317,10 +317,11 @@ export default class CombatSystem {
             state.isDead = false;
             state.player.hp = state.player.maxHp;
             state.invincibleTimer = RESPAWN_INVINCIBILITY;
-            // Respawn on first planet surface
+            // Respawn on nearest planet surface
             if (state.islands.length > 0) {
-                const spawn = state.islands[0];
-                const normal = new THREE.Vector3(0, 1, 0); // top of planet
+                const result = SphericalUtils.findNearestPlanet(state.player.pos, state.islands);
+                const spawn = result ? result.planet : state.islands[0];
+                const normal = SphericalUtils.getSurfaceNormal(state.player.pos, spawn);
                 const surfacePos = spawn.center.clone().add(normal.multiplyScalar(spawn.radius + 2));
                 state.player.pos.copy(surfacePos);
                 state.player.vel.set(0, 0, 0);
