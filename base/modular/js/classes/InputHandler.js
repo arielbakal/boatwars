@@ -33,6 +33,9 @@ export default class InputHandler {
             if (k === 'd') state.inputs.d = true;
             if (k === ' ') state.inputs.space = true;
             if (k === 'shift') state.inputs.shift = true;
+            // Ship pitch — nose up/down (Arrow keys or R/F)
+            if (k === 'arrowup' || k === 'r') { state.inputs.pitchUp = true; if (state.isOnBoat) e.preventDefault(); }
+            if (k === 'arrowdown' || k === 'f') { state.inputs.pitchDown = true; if (state.isOnBoat) e.preventDefault(); }
             // Inventory slots
             const idx = parseInt(k) - 1;
             if (idx >= 0 && idx < 8) {
@@ -81,6 +84,8 @@ export default class InputHandler {
             if (k === 'd') state.inputs.d = false;
             if (k === ' ') state.inputs.space = false;
             if (k === 'shift') state.inputs.shift = false;
+            if (k === 'arrowup' || k === 'r') state.inputs.pitchUp = false;
+            if (k === 'arrowdown' || k === 'f') state.inputs.pitchDown = false;
         });
     }
 

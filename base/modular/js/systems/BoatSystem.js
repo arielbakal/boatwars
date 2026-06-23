@@ -1,7 +1,8 @@
 // =====================================================
-// SPACESHIP SYSTEM - Full 3D flight with quaternion orientation
-// 4DOF: yaw + pitch, auto-leveled roll
-// Dual flight modes: planet-proximity vs deep-space
+// SPACESHIP SYSTEM - Arcade 3D flight with quaternion orientation
+// Controls: W/S thrust, A/D yaw, Arrow Up/Down (or R/F) pitch
+// Inertial dampeners: velocity follows the nose, no free-drift.
+// Auto-leveled roll for a stable horizon. One consistent flight feel.
 // Chase camera + cockpit view toggle
 // =====================================================
 
@@ -11,9 +12,7 @@ import {
     SHIP_REVERSE_FACTOR, SHIP_MIN_SPEED, SHIP_COLLISION_RADIUS, SHIP_PROXIMITY_RANGE,
     SHIP_DECK_Y_OFFSET, SHIP_PLAYER_Y_OFFSET,
     SHIP_PITCH_SPEED, SHIP_YAW_SPEED,
-    SHIP_GRAVITY_STRENGTH, SHIP_GRAVITY_RANGE,
-    SHIP_PLANET_MODE_RADIUS, SHIP_SPACE_MODE_RADIUS,
-    SHIP_AUTO_LEVEL_SPEED, SHIP_MAX_PLANET_PITCH,
+    SHIP_AUTO_LEVEL_SPEED,
     BOARDING_WALK_SPEED, CAT_BOARDING_DELAY,
     CAMERA_DISTANCE_BOAT
 } from '../constants.js';
@@ -215,32 +214,9 @@ export default class BoatSystem {
     // FLIGHT MODE DETECTION
     // ===========================================
 
-    _updateFlightMode(state, boatPos) {
+    _updateNearestPlanet(state, boatPos) {
         const result = SphericalUtils.findNearestPlanet(boatPos, state.islands);
-        if (!result || !result.planet) {
-            state.shipNearestPlanet = null;
-            state.shipFlightMode = 'space';
-            state.shipPlanetBlend = 1.0;
-            return;
-        }
-
-        state.shipNearestPlanet = result.planet;
-
-        const altitude = result.altitude; // distance from surface
-        const r = result.planet.radius;
-        const planetThreshold = r * SHIP_PLANET_MODE_RADIUS;
-        const spaceThreshold = r * SHIP_SPACE_MODE_RADIUS;
-
-        if (altitude < planetThreshold) {
-            state.shipFlightMode = 'planet';
-            state.shipPlanetBlend = 0.0;
-        } else if (altitude > spaceThreshold) {
-            state.shipFlightMode = 'space';
-            state.shipPlanetBlend = 1.0;
-        } else {
-            state.shipFlightMode = 'transition';
-            state.shipPlanetBlend = (altitude - planetThreshold) / (spaceThreshold - planetThreshold);
-        }
+        state.shipNearestPlanet = (result && result.planet) ? result.planet : null;
     }
 
     // ===========================================
@@ -253,68 +229,30 @@ export default class BoatSystem {
      * In space mode, "up" = ship's current Y axis (no correction).
      * In transition, blend between them.
      */
-    _autoLevelRoll(state, dt) {
+    _autoLevelRoll(state) {
         const q = state.shipQuaternion;
 
-        // No roll correction in deep space
-        if (state.shipFlightMode === 'space') return;
-        if (!state.shipNearestPlanet) return;
+        // Universal "up" — keeps a stable horizon everywhere (no mode switching)
+        const desiredUp = _tmpVec3.set(0, 1, 0);
 
-        const boat = state.activeBoat;
-        const desiredUp = SphericalUtils.getSurfaceNormal(boat.position, state.shipNearestPlanet);
-
-        // Current ship axes
         const shipForward = _tmpVec.set(0, 0, -1).applyQuaternion(q).normalize();
         const shipUp = _tmpVec2.set(0, 1, 0).applyQuaternion(q).normalize();
 
         // Project desired up onto the plane perpendicular to ship forward
-        const projUp = _tmpVec3.copy(desiredUp)
+        const projUp = desiredUp
             .addScaledVector(shipForward, -desiredUp.dot(shipForward))
             .normalize();
 
-        if (projUp.lengthSq() < 0.001) return; // degenerate case
+        if (projUp.lengthSq() < 0.001) return; // nose pointing straight up/down — skip
 
-        // Compute rotation from current shipUp to projUp around shipForward
         const dot = Math.max(-1, Math.min(1, shipUp.dot(projUp)));
         const angle = Math.acos(dot);
         if (angle < 0.001) return; // already level
 
-        const cross = shipUp.clone().cross(projUp);
-        const sign = cross.dot(shipForward) > 0 ? 1 : -1;
-
-        // Correction strength scales with planet blend (stronger in planet mode)
-        const correctionAngle = sign * Math.min(angle, SHIP_AUTO_LEVEL_SPEED * (1.0 - state.shipPlanetBlend * 0.8));
+        const sign = shipUp.clone().cross(projUp).dot(shipForward) > 0 ? 1 : -1;
+        const correctionAngle = sign * Math.min(angle, SHIP_AUTO_LEVEL_SPEED);
         _tmpQuat.setFromAxisAngle(shipForward, correctionAngle);
         q.premultiply(_tmpQuat).normalize();
-    }
-
-    // ===========================================
-    // PITCH CLAMPING (planet mode)
-    // ===========================================
-
-    _clampPitchInPlanetMode(state) {
-        if (state.shipFlightMode === 'space') return;
-        if (!state.shipNearestPlanet) return;
-
-        const q = state.shipQuaternion;
-        const boat = state.activeBoat;
-        const normal = SphericalUtils.getSurfaceNormal(boat.position, state.shipNearestPlanet);
-
-        // Ship forward
-        const shipForward = _tmpVec.set(0, 0, -1).applyQuaternion(q).normalize();
-
-        // Angle between forward and tangent plane
-        const dotUp = shipForward.dot(normal);
-        const pitchAngle = Math.asin(Math.max(-1, Math.min(1, dotUp)));
-
-        const maxPitch = SHIP_MAX_PLANET_PITCH * (1.0 - state.shipPlanetBlend * 0.5);
-
-        if (Math.abs(pitchAngle) > maxPitch) {
-            const excess = pitchAngle - Math.sign(pitchAngle) * maxPitch;
-            const shipRight = _tmpVec2.set(1, 0, 0).applyQuaternion(q).normalize();
-            _tmpQuat.setFromAxisAngle(shipRight, -excess * 0.3);
-            q.premultiply(_tmpQuat).normalize();
-        }
     }
 
     // ===========================================
@@ -343,26 +281,22 @@ export default class BoatSystem {
         if (isNaN(stats.currentSpeed)) stats.currentSpeed = 0;
         if (isNaN(stats.maxSpeed) || stats.maxSpeed <= 0) stats.maxSpeed = SHIP_MAX_SPEED;
 
-        // --- Flight mode detection ---
-        this._updateFlightMode(state, boat.position);
+        // --- Nearest planet (for auto-level reference + HUD altitude) ---
+        this._updateNearestPlanet(state, boat.position);
 
         // --- Orientation: yaw + pitch via quaternion ---
         const q = state.shipQuaternion;
-        const speedRatio = Math.min(Math.abs(stats.currentSpeed) / stats.maxSpeed, 1);
 
-        // Yaw (A/D) — rotate around ship's local Y-axis
+        // Yaw (A/D) — rotate around ship's local Y-axis at a constant rate
         if (state.inputs.a || state.inputs.d) {
-            const yawRate = SHIP_YAW_SPEED * (0.3 + speedRatio * 0.7);
-            const yawDelta = state.inputs.a ? yawRate : -yawRate;
+            const yawDelta = state.inputs.a ? SHIP_YAW_SPEED : -SHIP_YAW_SPEED;
             const shipUp = _tmpVec.set(0, 1, 0).applyQuaternion(q).normalize();
             _tmpQuat.setFromAxisAngle(shipUp, yawDelta);
             q.premultiply(_tmpQuat).normalize();
         }
 
-        // Pitch (Space = pitch up, Shift = pitch down — while on ship)
-        const pitchInput = (state.inputs.pitchUp || (state.isOnBoat && state.inputs.space))
-            ? 1 : (state.inputs.pitchDown || (state.isOnBoat && state.inputs.shift))
-            ? -1 : 0;
+        // Pitch (Arrow Up/Down or R/F) — nose up / nose down
+        const pitchInput = state.inputs.pitchUp ? 1 : state.inputs.pitchDown ? -1 : 0;
 
         if (pitchInput !== 0) {
             const shipRight = _tmpVec.set(1, 0, 0).applyQuaternion(q).normalize();
@@ -370,11 +304,8 @@ export default class BoatSystem {
             q.premultiply(_tmpQuat).normalize();
         }
 
-        // Auto-level roll
-        this._autoLevelRoll(state, dt);
-
-        // Clamp pitch near planets
-        this._clampPitchInPlanetMode(state);
+        // Auto-level roll (keep a stable horizon)
+        this._autoLevelRoll(state);
 
         // --- Thrust: W = forward accel, S = brake/reverse ---
         const shipForward = _tmpVec.set(0, 0, -1).applyQuaternion(q).normalize();
@@ -394,48 +325,25 @@ export default class BoatSystem {
             if (Math.abs(stats.currentSpeed) < SHIP_MIN_SPEED) stats.currentSpeed = 0;
         }
 
-        // Build velocity vector from speed + forward direction
+        // Arcade dampeners: velocity always follows the nose (no free-drift gravity)
         state.shipVelocity.copy(shipForward).multiplyScalar(stats.currentSpeed);
-
-        // --- Gravity from nearby planets ---
-        for (const planet of state.islands) {
-            const toPlanet = _tmpVec2.copy(planet.center).sub(boat.position);
-            const dist = toPlanet.length();
-            const maxRange = planet.radius * SHIP_GRAVITY_RANGE;
-            if (dist > maxRange || dist < 0.1) continue;
-
-            // Inverse-square gravity: F = strength × (r² / d²)
-            const force = SHIP_GRAVITY_STRENGTH * (planet.radius * planet.radius) / (dist * dist);
-            toPlanet.normalize().multiplyScalar(force);
-            state.shipVelocity.add(toPlanet);
-        }
 
         state.boatSpeed = stats.currentSpeed;
 
         // --- Position update ---
         const newPos = _tmpVec3.copy(boat.position).add(state.shipVelocity);
 
-        // Planet collision
+        // Planet collision — push out and bleed off speed (gentle recoil)
         let blocked = false;
         for (const planet of state.islands) {
             const dist = newPos.distanceTo(planet.center);
             const minDist = planet.radius + SHIP_COLLISION_RADIUS;
             if (dist < minDist) {
-                // Push out to minimum distance
                 const normal = _tmpVec.copy(newPos).sub(planet.center).normalize();
                 boat.position.copy(planet.center).addScaledVector(normal, minDist);
-
-                // Reflect velocity off collision normal
-                const velDotNorm = state.shipVelocity.dot(normal);
-                if (velDotNorm < 0) {
-                    state.shipVelocity.addScaledVector(normal, -velDotNorm * 1.15);
-                    state.shipVelocity.multiplyScalar(0.15); // heavy damping on bounce
-                }
-
-                stats.currentSpeed = state.shipVelocity.length() *
-                    Math.sign(shipForward.dot(state.shipVelocity) || 1);
-
-                if (Math.abs(state.boatSpeed) > 0.02) audio.pop();
+                if (Math.abs(stats.currentSpeed) > 0.02) audio.pop();
+                stats.currentSpeed *= -0.3; // small bounce back
+                state.shipVelocity.set(0, 0, 0);
                 state.boatSpeed = stats.currentSpeed;
                 blocked = true;
                 break;
@@ -452,14 +360,9 @@ export default class BoatSystem {
         // --- HUD ---
         const speedVal = document.getElementById('boat-speed-val');
         const healthVal = document.getElementById('boat-health-val');
-        const modeEl = document.getElementById('ship-flight-mode');
         const altEl = document.getElementById('ship-altitude');
         if (speedVal) speedVal.textContent = (Math.abs(stats.currentSpeed) * 100).toFixed(1);
         if (healthVal) healthVal.textContent = Math.ceil(stats.health);
-        if (modeEl) {
-            const modeLabels = { planet: 'PLANET', transition: 'TRANSIT', space: 'SPACE' };
-            modeEl.textContent = modeLabels[state.shipFlightMode] || 'SPACE';
-        }
         if (altEl && state.shipNearestPlanet) {
             const alt = SphericalUtils.getAltitude(boat.position, state.shipNearestPlanet);
             altEl.textContent = alt.toFixed(1);

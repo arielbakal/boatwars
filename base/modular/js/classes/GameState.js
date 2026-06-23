@@ -77,10 +77,8 @@ export default class GameState {
         this.boatSpeed = 0;            // scalar speed (magnitude of shipVelocity, for HUD)
         this.boatRotation = 0;         // legacy yaw — kept for compat but unused in 3D mode
         this.shipQuaternion = new THREE.Quaternion();  // full 3D orientation
-        this.shipVelocity = new THREE.Vector3();       // 3D momentum vector
-        this.shipFlightMode = 'space'; // 'planet' | 'transition' | 'space'
-        this.shipPlanetBlend = 1.0;    // 0=full planet mode, 1=full space mode
-        this.shipNearestPlanet = null; // nearest planet ref while flying
+        this.shipVelocity = new THREE.Vector3();       // 3D velocity (nose-aligned, dampened)
+        this.shipNearestPlanet = null; // nearest planet ref while flying (auto-level + HUD)
         this.shipCameraMode = 'chase'; // 'chase' | 'cockpit'
 
         // Boarding animation
