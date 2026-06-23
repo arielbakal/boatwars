@@ -17,7 +17,7 @@ export default class LLMService {
 
     setSystemPrompt(prompt) {
         this.systemPrompt = prompt;
-    }dsa
+    }
 
     async sendChat(userMessage, history = []) {
         // No LLM integration — return a random fallback response
