@@ -26,7 +26,14 @@ export default class EntityAISystem {
                 const planet = e.userData.planet;
                 if (planet) {
                     const normal = SphericalUtils.getSurfaceNormal(e.position, planet);
-                    const basePos = planet.center.clone().add(normal.clone().multiplyScalar(planet.radius + (e.userData.heightOffset || 2.2)));
+                    // Use cached terrain radius; refresh when entity moves more than 0.5 units
+                    const cachedPos = e.userData._terrainCachePos;
+                    if (!cachedPos || cachedPos.distanceToSquared(e.position) > 0.25) {
+                        e.userData._terrainRadius = SphericalUtils.sampleTerrainHeight(planet, normal);
+                        e.userData._terrainCachePos = e.position.clone();
+                    }
+                    const terrainRadius = e.userData._terrainRadius || planet.radius;
+                    const basePos = planet.center.clone().add(normal.clone().multiplyScalar(terrainRadius + (e.userData.heightOffset || 2.2)));
                     e.position.copy(basePos).add(normal.clone().multiplyScalar(Math.sin(time) * 0.1));
                 }
                 if (e.userData.lArm) e.userData.lArm.rotation.x = Math.sin(time) * 0.15;
@@ -47,8 +54,15 @@ export default class EntityAISystem {
                 const planet = e.userData.planet;
                 if (planet) {
                     const normal = SphericalUtils.getSurfaceNormal(e.position, planet);
+                    // Use cached terrain radius; refresh when entity moves more than 0.5 units
+                    const cachedPos = e.userData._terrainCachePos;
+                    if (!cachedPos || cachedPos.distanceToSquared(e.position) > 0.25) {
+                        e.userData._terrainRadius = SphericalUtils.sampleTerrainHeight(planet, normal);
+                        e.userData._terrainCachePos = e.position.clone();
+                    }
+                    const terrainRadius = e.userData._terrainRadius || planet.radius;
                     const heightOffset = (e.userData.heightOffset || 0.3) + Math.sin(t * 4 + (e.userData.hopOffset || 0)) * 0.03;
-                    const basePos = planet.center.clone().add(normal.clone().multiplyScalar(planet.radius + heightOffset));
+                    const basePos = planet.center.clone().add(normal.clone().multiplyScalar(terrainRadius + heightOffset));
                     e.position.copy(basePos);
                 }
             }

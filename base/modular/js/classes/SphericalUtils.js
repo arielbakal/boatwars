@@ -2,6 +2,10 @@
 // SPHERICAL UTILS - Shared math for spherical planet worlds
 // =====================================================
 
+// Shared raycaster instance for terrain sampling — avoids per-call allocation.
+// Lazily initialized on first use so THREE global is guaranteed to be ready.
+let _terrainRaycaster = null;
+
 export default class SphericalUtils {
     /**
      * Get the surface normal (up direction) at a position on a planet.
@@ -209,5 +213,49 @@ export default class SphericalUtils {
         const n2 = SphericalUtils.getSurfaceNormal(refPoint, planet);
         const angle = Math.acos(Math.min(1, Math.max(-1, n1.dot(n2))));
         return angle * planet.radius < maxDist;
+    }
+
+    /**
+     * Sample the actual displaced terrain height at a given direction on a planet.
+     *
+     * Fires a ray from outside the planet inward along `dirNormalized` against the
+     * planet's groundMesh (the surface/grass icosahedron whose vertices are displaced
+     * by distortGeometryRadial). Returns the real distance from planet.center to the
+     * intersection point, so callers can use it instead of the nominal planet.radius.
+     *
+     * Falls back to planet.radius when:
+     *   - planet.groundMesh is missing or not yet in the scene
+     *   - the ray misses the mesh (should never happen for a convex-ish sphere, but
+     *     degenerate normals or invisible faces could cause a miss)
+     *
+     * IMPORTANT: groundMesh must have its world matrix up to date before calling.
+     * Call planet.groundMesh.updateWorldMatrix(true, false) if in doubt.
+     *
+     * @param {Object} planet - { center: THREE.Vector3, radius: number, groundMesh: THREE.Mesh }
+     * @param {THREE.Vector3} dirNormalized - Unit vector pointing from center outward toward surface
+     * @returns {number} Distance from planet.center to the real terrain surface
+     */
+    static sampleTerrainHeight(planet, dirNormalized) {
+        if (!planet.groundMesh) return planet.radius;
+
+        // Lazy init: THREE is a CDN global, guaranteed present by first call time
+        if (!_terrainRaycaster) _terrainRaycaster = new THREE.Raycaster();
+
+        // Start the ray from well outside the planet (1.5× radius ensures we're above any bump)
+        const rayOrigin = planet.center.clone().add(dirNormalized.clone().multiplyScalar(planet.radius * 1.5));
+        // Aim inward toward planet center
+        const rayDir = dirNormalized.clone().negate();
+
+        _terrainRaycaster.set(rayOrigin, rayDir);
+        // Only check the ground mesh, not the whole scene — cheaper and unambiguous
+        const hits = _terrainRaycaster.intersectObject(planet.groundMesh, false);
+
+        if (hits.length > 0) {
+            // hits[0].point is the world-space intersection; measure from planet center
+            return hits[0].point.distanceTo(planet.center);
+        }
+
+        // Fallback: nominal radius keeps nothing from disappearing
+        return planet.radius;
     }
 }

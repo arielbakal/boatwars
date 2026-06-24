@@ -222,14 +222,31 @@ export default class GameEngine {
 
     /**
      * Place an entity on a planet surface with correct position and orientation.
+     *
+     * Uses SphericalUtils.sampleTerrainHeight to fire a ray against the planet's
+     * groundMesh and find the actual displaced surface height, so objects land on
+     * real terrain instead of the nominal sphere radius. Falls back to planet.radius
+     * automatically when groundMesh is unavailable or the ray misses.
+     *
+     * Ordering guarantee: this is only called after createPlanet() + world.add(planet.group),
+     * so the groundMesh is already in the scene and its world matrix is valid.
+     *
      * @param {THREE.Object3D} entity - Entity to place
-     * @param {Object} planet - { center: THREE.Vector3, radius: number }
-     * @param {THREE.Vector3} surfacePoint - Desired position on surface
+     * @param {Object} planet - { center: THREE.Vector3, radius: number, groundMesh?: THREE.Mesh }
+     * @param {THREE.Vector3} surfacePoint - Desired position on (nominal) surface
      */
     placeOnPlanet(entity, planet, surfacePoint) {
         const normal = SphericalUtils.getSurfaceNormal(surfacePoint, planet);
         const heightOffset = entity.userData.heightOffset || 0;
-        const pos = planet.center.clone().add(normal.clone().multiplyScalar(planet.radius + heightOffset));
+
+        // Sample the real displaced terrain height along this surface normal.
+        // groundMesh world matrix must be current; world.add() above guarantees this
+        // when called during initGame (Three.js updates matrices on the next render,
+        // but Raycaster.intersectObject triggers a matrix update internally for meshes
+        // already parented to the scene — safe at placement time).
+        const terrainRadius = SphericalUtils.sampleTerrainHeight(planet, normal);
+
+        const pos = planet.center.clone().add(normal.clone().multiplyScalar(terrainRadius + heightOffset));
         entity.position.copy(pos);
 
         // Orient so local Y-up aligns with surface normal
@@ -267,6 +284,7 @@ export default class GameEngine {
         this.state.islands.push({
             center: planet1.center.clone(),
             radius: planet1.radius,
+            groundMesh: planet1.groundMesh, // Real displaced surface mesh for terrain sampling
             floorY: 0, // Legacy, not used in spherical mode
             name: "STARTING PLANET"
         });
@@ -339,6 +357,7 @@ export default class GameEngine {
         this.state.islands.push({
             center: planet2.center.clone(),
             radius: planet2.radius,
+            groundMesh: planet2.groundMesh,
             floorY: 0,
             name: "FLORA WORLD"
         });
@@ -398,6 +417,7 @@ export default class GameEngine {
         this.state.islands.push({
             center: planet3.center.clone(),
             radius: planet3.radius,
+            groundMesh: planet3.groundMesh,
             floorY: 0,
             name: "ANCIENT PEAKS"
         });
@@ -481,6 +501,7 @@ export default class GameEngine {
         this.state.islands.push({
             center: planet4.center.clone(),
             radius: planet4.radius,
+            groundMesh: planet4.groundMesh,
             floorY: 0,
             name: "ROCKY OUTPOST"
         });
@@ -534,6 +555,7 @@ export default class GameEngine {
         this.state.islands.push({
             center: planet5.center.clone(),
             radius: planet5.radius,
+            groundMesh: planet5.groundMesh,
             floorY: 0,
             name: "DISTANT WORLD"
         });

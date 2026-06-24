@@ -71,7 +71,9 @@ export default class MineSystem {
                     if (rockPlanet) {
                         const dropPos = SphericalUtils.randomSurfacePointNear(rockPlanet, rock.position, 0.2, 0.8);
                         const normal = SphericalUtils.getSurfaceNormal(dropPos, rockPlanet);
-                        drop.position.copy(rockPlanet.center.clone().add(normal.multiplyScalar(rockPlanet.radius + 0.15)));
+                        // Sample real terrain height so drops land on the displaced surface
+                        const terrainRadius = SphericalUtils.sampleTerrainHeight(rockPlanet, normal);
+                        drop.position.copy(rockPlanet.center.clone().add(normal.multiplyScalar(terrainRadius + 0.15)));
                         drop.userData.planet = rockPlanet;
                     } else {
                         drop.position.copy(rock.position);

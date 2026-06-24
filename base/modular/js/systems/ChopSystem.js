@@ -111,7 +111,10 @@ export default class ChopSystem {
                 if (treePlanet) {
                     const logSurfacePos = SphericalUtils.randomSurfacePointNear(treePlanet, treePos, 0.2, 0.8);
                     const normal = SphericalUtils.getSurfaceNormal(logSurfacePos, treePlanet);
-                    const logWorldPos = treePlanet.center.clone().add(normal.multiplyScalar(treePlanet.radius));
+                    // Sample real terrain height so the log lands on the displaced surface
+                    const terrainRadius = SphericalUtils.sampleTerrainHeight(treePlanet, normal);
+                    const logHeightOffset = log.userData.heightOffset || 0;
+                    const logWorldPos = treePlanet.center.clone().add(normal.multiplyScalar(terrainRadius + logHeightOffset));
                     log.position.copy(logWorldPos);
                     const q = SphericalUtils.getOrientationOnSurface(normal);
                     log.quaternion.copy(q);

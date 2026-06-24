@@ -454,7 +454,10 @@ export default class EntityFactory {
         g.add(m);
         g.position.set(x, 0, z);
         g.scale.set(0, 0, 0);
-        g.userData = { type: 'rock', style: dna, color: dna.color, heightOffset: 0 };
+        // heightOffset lifts the rock so its center-origin geometry sits on the surface.
+        // Each shape's half-extent in local Y: ico/dodec radius=0.35, box half-height=0.25, slab half-height=0.15.
+        const rockHeightOffset = dna.shape === 'box' ? 0.25 : dna.shape === 'slab' ? 0.15 : 0.35;
+        g.userData = { type: 'rock', style: dna, color: dna.color, heightOffset: rockHeightOffset };
         return g;
     }
 
