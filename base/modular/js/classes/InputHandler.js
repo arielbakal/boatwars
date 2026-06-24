@@ -3,6 +3,7 @@
 // =====================================================
 
 import SphericalUtils from './SphericalUtils.js';
+import { SHIP_COLLISION_RADIUS } from '../constants.js';
 
 export default class InputHandler {
     constructor(engine) {
@@ -576,15 +577,24 @@ export default class InputHandler {
                 });
                 center.divideScalar(cluster.length);
 
-                // Create spaceship in space near the planet surface
+                // Create spaceship resting on the planet surface, oriented flush to it
                 const result = SphericalUtils.findNearestPlanet(center, state.islands);
                 let spawnPos = center.clone();
+                let surfaceNormal = null;
                 if (result && result.planet) {
-                    const normal = SphericalUtils.getSurfaceNormal(center, result.planet);
-                    spawnPos = result.planet.center.clone().add(normal.multiplyScalar(result.planet.radius + 3));
+                    surfaceNormal = SphericalUtils.getSurfaceNormal(center, result.planet);
+                    // Rest the belly on the surface (radius + collision radius), not a magic offset
+                    spawnPos = result.planet.center.clone().add(
+                        surfaceNormal.clone().multiplyScalar(result.planet.radius + SHIP_COLLISION_RADIUS)
+                    );
                 }
 
                 const boat = factory.createSpaceship(spawnPos.x, spawnPos.y, spawnPos.z, boatColor);
+                // Orient the ship flush to the surface (Y-up = surface normal) so it
+                // doesn't stand upright in world space regardless of the planet face.
+                if (surfaceNormal) {
+                    boat.quaternion.copy(SphericalUtils.getOrientationOnSurface(surfaceNormal));
+                }
                 world.add(boat);
                 state.entities.push(boat);
                 sfx.boatBuild();

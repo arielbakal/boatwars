@@ -13,6 +13,8 @@ import {
     SHIP_DECK_Y_OFFSET, SHIP_PLAYER_Y_OFFSET,
     SHIP_PITCH_SPEED, SHIP_YAW_SPEED,
     SHIP_AUTO_LEVEL_SPEED,
+    SHIP_GRAVITY_STRENGTH, SHIP_GRAVITY_RANGE,
+    SHIP_TAKEOFF_SPEED, SHIP_TAKEOFF_ALTITUDE, SHIP_GROUND_REST_ALTITUDE,
     BOARDING_WALK_SPEED, CAT_BOARDING_DELAY,
     CAMERA_DISTANCE_BOAT
 } from '../constants.js';
@@ -22,6 +24,8 @@ import SphericalUtils from '../classes/SphericalUtils.js';
 const _tmpVec = new THREE.Vector3();
 const _tmpVec2 = new THREE.Vector3();
 const _tmpVec3 = new THREE.Vector3();
+const _tmpVec4 = new THREE.Vector3();
+const _tmpGravity = new THREE.Vector3();
 const _tmpQuat = new THREE.Quaternion();
 const _tmpQuat2 = new THREE.Quaternion();
 
@@ -71,6 +75,12 @@ export default class BoatSystem {
         state.shipQuaternion.copy(boat.quaternion);
         state.shipVelocity.set(0, 0, 0);
         state.shipCameraMode = 'chase';
+
+        // The ship boards while resting on the surface — start grounded (taxi phase).
+        // Cleared once it gains enough speed/altitude to lift off (airplane-style takeoff).
+        const liftPlanet = SphericalUtils.findNearestPlanet(boat.position, state.islands);
+        state.shipGrounded = !!(liftPlanet && liftPlanet.planet &&
+            SphericalUtils.getAltitude(boat.position, liftPlanet.planet) < SHIP_COLLISION_RADIUS + SHIP_TAKEOFF_ALTITUDE);
 
         this.showBoatHUD(true);
         if (playerController.playerGroup) {
@@ -255,6 +265,23 @@ export default class BoatSystem {
         q.premultiply(_tmpQuat).normalize();
     }
 
+    /**
+     * Slerp the ship orientation toward "flush on the surface" while grounded:
+     * Y-up aligns with the surface normal, heading (current forward) is preserved
+     * by projecting it onto the tangent plane. Keeps the ship from pitching into
+     * the ground or pointing nose-up during taxi.
+     */
+    _levelToSurface(state, boat) {
+        const planet = state.shipNearestPlanet;
+        if (!planet) return;
+        const q = state.shipQuaternion;
+
+        const normal = _tmpVec.copy(boat.position).sub(planet.center).normalize();
+        const forward = _tmpVec2.set(0, 0, -1).applyQuaternion(q).normalize();
+        const target = SphericalUtils.getOrientationOnSurface(normal, forward);
+        q.slerp(target, SHIP_AUTO_LEVEL_SPEED).normalize();
+    }
+
     // ===========================================
     // MAIN PHYSICS UPDATE
     // ===========================================
@@ -304,8 +331,13 @@ export default class BoatSystem {
             q.premultiply(_tmpQuat).normalize();
         }
 
-        // Auto-level roll (keep a stable horizon)
-        this._autoLevelRoll(state);
+        // Leveling: while grounded keep the ship flush to the surface (Y-up = surface
+        // normal, heading preserved); in free flight just keep a stable world horizon.
+        if (state.shipGrounded && state.shipNearestPlanet) {
+            this._levelToSurface(state, boat);
+        } else {
+            this._autoLevelRoll(state);
+        }
 
         // --- Thrust: W = forward accel, S = brake/reverse ---
         const shipForward = _tmpVec.set(0, 0, -1).applyQuaternion(q).normalize();
@@ -325,24 +357,80 @@ export default class BoatSystem {
             if (Math.abs(stats.currentSpeed) < SHIP_MIN_SPEED) stats.currentSpeed = 0;
         }
 
-        // Arcade dampeners: velocity always follows the nose (no free-drift gravity)
+        // Arcade dampeners: thrust velocity always follows the nose...
         state.shipVelocity.copy(shipForward).multiplyScalar(stats.currentSpeed);
+
+        // --- Gravity + takeoff state machine (toward nearest planet) ---
+        const planet = state.shipNearestPlanet;
+        if (planet) {
+            const restAltitude = SHIP_COLLISION_RADIUS;          // belly-rest altitude above surface
+            const altitude = SphericalUtils.getAltitude(boat.position, planet);
+            // Outward surface normal at the ship's current position
+            const upNormal = _tmpVec2.copy(boat.position).sub(planet.center).normalize();
+
+            // Takeoff / grounding decision (airplane-style):
+            //  - Grounded -> free flight when forward speed exceeds takeoff threshold AND
+            //    the pilot is pitching up, OR the ship is already well above the surface.
+            //  - Free -> re-ground when it sinks back to contact altitude at low speed.
+            if (state.shipGrounded) {
+                const pitchingUp = state.inputs.pitchUp;
+                const fastEnough = stats.currentSpeed > SHIP_TAKEOFF_SPEED;
+                if ((fastEnough && pitchingUp) || altitude > restAltitude + SHIP_TAKEOFF_ALTITUDE) {
+                    state.shipGrounded = false;
+                }
+            } else if (altitude < restAltitude + SHIP_GROUND_REST_ALTITUDE &&
+                       stats.currentSpeed < SHIP_TAKEOFF_SPEED) {
+                state.shipGrounded = true;
+            }
+
+            if (state.shipGrounded) {
+                // TAXI: constrain motion to the surface tangent plane (no climbing).
+                // Remove any along-normal component of the thrust velocity so the ship
+                // slides flush across the surface instead of digging in or lifting off.
+                const along = state.shipVelocity.dot(upNormal);
+                state.shipVelocity.addScaledVector(upNormal, -along);
+                // No gravity term while grounded — the surface holds the ship; this keeps
+                // it perfectly stable at rest (no fight with the collision push-out).
+            } else {
+                // FREE FLIGHT: apply gravity toward the planet within range.
+                const dist = boat.position.distanceTo(planet.center);
+                if (dist < planet.radius * SHIP_GRAVITY_RANGE) {
+                    // Inverse-square-ish falloff, normalized to full strength at the surface.
+                    const ratio = planet.radius / Math.max(dist, planet.radius);
+                    const g = SHIP_GRAVITY_STRENGTH * ratio * ratio;
+                    // Pull toward planet center (-upNormal).
+                    _tmpGravity.copy(upNormal).multiplyScalar(-g);
+                    state.shipVelocity.add(_tmpGravity);
+                }
+            }
+        }
 
         state.boatSpeed = stats.currentSpeed;
 
         // --- Position update ---
         const newPos = _tmpVec3.copy(boat.position).add(state.shipVelocity);
 
+        // While grounded, re-snap to belly-rest altitude. Taxiing along a tangent on a
+        // curved planet would otherwise slowly drift the ship outward; this pins it to
+        // the surface so it rests/taxis flush with zero jitter against the collision loop.
+        if (state.shipGrounded && planet) {
+            const restNormal = _tmpVec4.copy(newPos).sub(planet.center).normalize();
+            newPos.copy(planet.center).addScaledVector(restNormal, planet.radius + SHIP_COLLISION_RADIUS);
+        }
+
         // Planet collision — push out and bleed off speed (gentle recoil)
         let blocked = false;
-        for (const planet of state.islands) {
-            const dist = newPos.distanceTo(planet.center);
-            const minDist = planet.radius + SHIP_COLLISION_RADIUS;
+        for (const p of state.islands) {
+            const dist = newPos.distanceTo(p.center);
+            const minDist = p.radius + SHIP_COLLISION_RADIUS;
             if (dist < minDist) {
-                const normal = _tmpVec.copy(newPos).sub(planet.center).normalize();
-                boat.position.copy(planet.center).addScaledVector(normal, minDist);
-                if (Math.abs(stats.currentSpeed) > 0.02) audio.pop();
-                stats.currentSpeed *= -0.3; // small bounce back
+                const normal = _tmpVec4.copy(newPos).sub(p.center).normalize();
+                boat.position.copy(p.center).addScaledVector(normal, minDist);
+                // Only recoil/sfx for a genuine impact, not a resting taxi contact.
+                if (!state.shipGrounded && Math.abs(stats.currentSpeed) > 0.02) {
+                    audio.pop();
+                    stats.currentSpeed *= -0.3; // small bounce back
+                }
                 state.shipVelocity.set(0, 0, 0);
                 state.boatSpeed = stats.currentSpeed;
                 blocked = true;

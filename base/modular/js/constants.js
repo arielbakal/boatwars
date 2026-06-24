@@ -56,13 +56,15 @@ export const SHIP_YAW_SPEED = 0.02;
 export const SHIP_HEALTH = 100;
 export const SHIP_TURN_SPEED = 0.02;
 
-// Spaceship gravity & flight modes
-export const SHIP_GRAVITY_STRENGTH = 0.002;    // gravity pull at reference distance
-export const SHIP_GRAVITY_RANGE = 4.0;         // max range as multiplier of planet radius
-export const SHIP_PLANET_MODE_RADIUS = 2.5;    // proximity multiplier: inside = planet mode
-export const SHIP_SPACE_MODE_RADIUS = 4.0;     // outside = full space mode
+// Spaceship gravity
+export const SHIP_GRAVITY_STRENGTH = 0.002;    // gravity acceleration at the surface (added each frame)
+export const SHIP_GRAVITY_RANGE = 4.0;         // gravity acts within this multiple of planet radius
 export const SHIP_AUTO_LEVEL_SPEED = 0.03;     // roll auto-correction rate
-export const SHIP_MAX_PLANET_PITCH = Math.PI / 4; // max pitch in planet mode (45°)
+
+// Spaceship takeoff / taxi (airplane-style grounded phase)
+export const SHIP_TAKEOFF_SPEED = 0.12;        // forward speed required to lift off the surface
+export const SHIP_TAKEOFF_ALTITUDE = 1.5;      // altitude above belly-rest at which flight frees up
+export const SHIP_GROUND_REST_ALTITUDE = 0.05; // altitude tolerance treated as "in contact" with surface
 
 // Legacy aliases for BoatSystem compatibility (map to SHIP_*)
 export const BOAT_BASE_HEALTH = SHIP_HEALTH;
