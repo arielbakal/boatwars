@@ -79,6 +79,7 @@ export default class GameState {
         this.shipQuaternion = new THREE.Quaternion();  // full 3D orientation
         this.shipVelocity = new THREE.Vector3();       // 3D velocity (nose-aligned, dampened)
         this.shipNearestPlanet = null; // nearest planet ref while flying (auto-level + HUD)
+        this.shipGrounded = false;     // true while resting/taxiing on a planet surface
         this.shipCameraMode = 'chase'; // 'chase' | 'cockpit'
 
         // Boarding animation

@@ -16,6 +16,10 @@ export default class EntityAISystem {
         for (let i = state.entities.length - 1; i >= 0; i--) {
             const e = state.entities[i];
 
+            // Skip AI/animation for entities that are dying (CombatSystem owns their
+            // shrink-and-remove). Prevents re-targeting, re-scaling, and double removal.
+            if (e.userData._dying) continue;
+
             // Pop-in scale
             if (e.scale.x < 0.99) e.scale.lerp(new THREE.Vector3(1, 1, 1), 0.05);
 
@@ -225,11 +229,20 @@ export default class EntityAISystem {
         // C4: Wobble grows stronger as egg approaches hatching (hatchTimer → 0).
         const hatchProgress = 1 - Math.max(0, e.userData.hatchTimer / EGG_HATCH_TIME);
         const wobble = Math.sin(t * 5 + (e.userData.wobblePhase || 0)) * 0.1 * hatchProgress;
-        // Apply wobble as a local rotation around the egg's X axis (tangent to surface normal)
-        // We store a wobble child or reuse the egg mesh's first child (the egg mesh itself).
-        // Since eggs are single-mesh groups, apply to the group's local X rotation.
-        // The surface orientation is in e.quaternion; local X wobble looks like a side-to-side rock.
-        e.rotation.x = wobble; // local X in the egg's surface-aligned frame
+
+        // Keep the egg group oriented flush to the planet surface (Y-up = surface normal),
+        // like every other surface entity. The group's quaternion holds that orientation.
+        const planet = e.userData.planet;
+        if (planet) {
+            const normal = SphericalUtils.getSurfaceNormal(e.position, planet);
+            e.quaternion.copy(SphericalUtils.getOrientationOnSurface(normal));
+        }
+        // Apply the wobble to the egg MESH (child), not the group. Writing e.rotation here
+        // would recompute e.quaternion from Euler and clobber the surface orientation above
+        // (rotation and quaternion both feed the same matrix; last write wins). Rocking the
+        // child keeps the surface-aligned group frame intact.
+        const eggMesh = e.children[0];
+        if (eggMesh) eggMesh.rotation.x = wobble; // side-to-side rock in the surface-aligned frame
 
         if (e.userData.hatchTimer <= 0) {
             audio.pop();

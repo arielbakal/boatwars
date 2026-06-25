@@ -241,6 +241,14 @@ export default class SphericalUtils {
         // Lazy init: THREE is a CDN global, guaranteed present by first call time
         if (!_terrainRaycaster) _terrainRaycaster = new THREE.Raycaster();
 
+        // Ensure the mesh world matrix is current. In r128, Raycaster.intersectObject
+        // does NOT update matrices, and Mesh.raycast reads matrixWorld directly. At
+        // generation time (right after world.add, before the first render) the planet
+        // group's translation may not be baked in yet, so a stale identity matrix would
+        // make the ray miss any off-origin planet. updateWorldMatrix(true,false) walks
+        // up to the parent group so the planet offset is applied before we cast.
+        planet.groundMesh.updateWorldMatrix(true, false);
+
         // Start the ray from well outside the planet (1.5× radius ensures we're above any bump)
         const rayOrigin = planet.center.clone().add(dirNormalized.clone().multiplyScalar(planet.radius * 1.5));
         // Aim inward toward planet center

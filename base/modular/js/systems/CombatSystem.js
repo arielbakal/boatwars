@@ -100,6 +100,7 @@ export default class CombatSystem {
 
         for (const e of state.entities) {
             if (e.userData.type !== 'creature') continue;
+            if (e.userData._dying) continue; // already dying — don't re-target the corpse
             if (e.userData.hp === undefined || e.userData.hp <= 0) continue;
 
             const diff = e.position.clone().sub(playerPos);
@@ -300,6 +301,7 @@ export default class CombatSystem {
 
         for (const e of state.entities) {
             if (e.userData.type !== 'creature') continue;
+            if (e.userData._dying) continue; // shrinking corpse — no contact damage
             if (e.userData.aggroTimer <= 0) continue;
 
             e.userData.contactCooldown = (e.userData.contactCooldown || 0) - dt;
@@ -321,6 +323,7 @@ export default class CombatSystem {
 
         for (const e of state.entities) {
             if (e.userData.type !== 'creature') continue;
+            if (e.userData._dying) continue; // shrinking corpse — stop chasing
             if (e.userData.aggroTimer <= 0) continue;
 
             e.userData.aggroTimer -= dt;
