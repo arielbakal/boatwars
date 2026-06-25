@@ -131,6 +131,8 @@ export default class CatAI {
         if (!catData.legs) return;
         catData.legs.forEach(leg => {
             leg.position.y += (0.1 - leg.position.y) * 0.1;
+            // C9: relax the walk swing too, or legs freeze tilted when the cat stops
+            leg.rotation.x += (0 - leg.rotation.x) * 0.1;
         });
     }
 }

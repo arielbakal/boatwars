@@ -452,12 +452,25 @@ export default class PlayerController {
                 .add(up.clone().multiplyScalar(vertDist));
 
             const desiredPos = player.pos.clone().add(offset);
-            camera.position.lerp(desiredPos, CAMERA_LERP);
-
             const lookTarget = player.pos.clone().add(up.clone().multiplyScalar(0.5));
-            // C8: Smooth the lookAt target to avoid jarring snaps when surface normal changes fast
             if (!this._lookTarget) this._lookTarget = lookTarget.clone();
-            this._lookTarget.lerp(lookTarget, 0.2);
+
+            // Detect a teleport (disembark, respawn, out-of-bounds snap): the player
+            // jumps farther than any single on-foot frame ever could. Snap the camera
+            // and look target instead of slowly lerping them across the world.
+            const teleported = this._prevCamPlayerPos
+                && player.pos.distanceToSquared(this._prevCamPlayerPos) > 25; // > 5 units
+            if (!this._prevCamPlayerPos) this._prevCamPlayerPos = new THREE.Vector3();
+            this._prevCamPlayerPos.copy(player.pos);
+
+            if (teleported) {
+                camera.position.copy(desiredPos);
+                this._lookTarget.copy(lookTarget);
+            } else {
+                camera.position.lerp(desiredPos, CAMERA_LERP);
+                // C8: Smooth the lookAt target to avoid jarring snaps when surface normal changes fast
+                this._lookTarget.lerp(lookTarget, 0.2);
+            }
             camera.lookAt(this._lookTarget);
             camera.up.copy(up);
         }
