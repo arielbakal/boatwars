@@ -10,6 +10,11 @@ import {
 } from '../constants.js';
 import SphericalUtils from './SphericalUtils.js';
 
+// --- Animation helper ---
+function easeInOutQuad(t) {
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
 export default class PlayerController {
     constructor(world, state) {
         this.world = world;
@@ -22,6 +27,7 @@ export default class PlayerController {
         this.armR = null;
         this.time = 0;
         this.chopAnimState = null;
+        this._lookTarget = null; // C8: smoothed camera look target
 
         // Spherical world state
         this._surfaceNormal = new THREE.Vector3(0, 1, 0); // Current "up" direction
@@ -95,7 +101,13 @@ export default class PlayerController {
         }
         this.heldItem = item;
         if (item) {
-            item.rotation.set(Math.PI, Math.PI, -Math.PI / 4);
+            // C1: Axe handle is along local +Y; head/blade at +Y tip facing +Z.
+            // We want the handle to run along the forearm (local -Y of the anchor, pointing up)
+            // and the blade to face FORWARD (+Z in player space).
+            // Rotation: tilt the axe so its local +Y aligns with the anchor's local +Z (forward),
+            // then rotate 90° around Z so the blade sweeps outward rather than sideways.
+            // Result: handle along forearm, blade edge pointing +Z (outward/forward).
+            item.rotation.set(-Math.PI / 2, 0, -Math.PI / 4);
             item.position.set(0, 0, 0);
             this.handAnchorR.add(item);
         }
@@ -339,16 +351,17 @@ export default class PlayerController {
         if (state.isAttacking) {
             const swingT = (state._attackVisualTimer || 0) / 0.4;
             let armAngleR, armAngleL;
+            // C5: ease-in/out on each phase for impact feel
             if (swingT < 0.4) {
-                const t = swingT / 0.4;
+                const t = easeInOutQuad(swingT / 0.4);
                 armAngleR = -1.8 * t;
                 armAngleL = -1.4 * t;
             } else if (swingT < 0.8) {
-                const t = (swingT - 0.4) / 0.4;
+                const t = easeInOutQuad((swingT - 0.4) / 0.4);
                 armAngleR = -1.8 + (1.8 + 1.2) * t;
                 armAngleL = -1.4 + (1.4 + 0.8) * t;
             } else {
-                const t = (swingT - 0.8) / 0.2;
+                const t = easeInOutQuad((swingT - 0.8) / 0.2);
                 armAngleR = 1.2 * (1 - t);
                 armAngleL = 0.8 * (1 - t);
             }
@@ -356,15 +369,22 @@ export default class PlayerController {
             this.armL.rotation.x = armAngleL;
             this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, 0.15);
             this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, 0.15);
+            // C5: subtle forward torso lurch timed with the strike (peak at swingT ~0.6)
+            const lurcht = Math.max(0, Math.sin(swingT * Math.PI));
+            this.modelPivot.position.z = lurcht * 0.08;
             this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, 0.1);
         } else if (this.chopAnimState) {
             const { isSwinging, swingProgress } = this.chopAnimState;
             if (isSwinging) {
                 const t = 1.0 - swingProgress;
-                const swingAngle = -1.2 + t * 2.2;
+                // C5: ease in/out on chop swing too
+                const swingAngle = -1.2 + easeInOutQuad(t) * 2.2;
                 this.armR.rotation.x = swingAngle;
+                // C5: subtle torso lurch at mid-swing
+                this.modelPivot.position.z = easeInOutQuad(Math.min(t * 2, 1) * Math.max(0, 1 - (t - 0.5) * 2)) * 0.07;
             } else {
                 this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, -1.2, 0.15);
+                this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, 0.15);
             }
             this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, -0.3, 0.1);
             this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, 0.1);
@@ -377,6 +397,7 @@ export default class PlayerController {
             this.armL.rotation.x = Math.sin(walkCycle + Math.PI) * 0.5;
             this.armR.rotation.x = Math.sin(walkCycle) * 0.5;
             this.modelPivot.position.y = Math.abs(Math.sin(walkCycle * 2)) * 0.05;
+            this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, 0.1);
         } else {
             const lerp = 0.1;
             this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, lerp);
@@ -384,6 +405,7 @@ export default class PlayerController {
             this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, 0, lerp);
             this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, 0, lerp);
             this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, lerp);
+            this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, lerp);
         }
     }
 
@@ -433,7 +455,10 @@ export default class PlayerController {
             camera.position.lerp(desiredPos, CAMERA_LERP);
 
             const lookTarget = player.pos.clone().add(up.clone().multiplyScalar(0.5));
-            camera.lookAt(lookTarget);
+            // C8: Smooth the lookAt target to avoid jarring snaps when surface normal changes fast
+            if (!this._lookTarget) this._lookTarget = lookTarget.clone();
+            this._lookTarget.lerp(lookTarget, 0.2);
+            camera.lookAt(this._lookTarget);
             camera.up.copy(up);
         }
     }

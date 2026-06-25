@@ -120,7 +120,13 @@ export default class InputHandler {
                 item = this.engine.factory.createPickaxe(state.palette, 0, 0);
             }
             this.engine.world.remove(item);
-            item.scale.set(1, 1, 1);
+            // C2: Scale up the held tool so it reads at a believable hand-held size.
+            // The factory creates world-scale props (small); 1.8x makes the axe legible in hand.
+            // C3: The item is held in handAnchorR (on armR at -0.35 X). With the model facing +Z,
+            // -X is the character's RIGHT hand (correct — armR = character's right arm).
+            // Convention is correct; no geometry change needed.
+            const heldScale = (type === 'axe') ? 1.8 : 1.5;
+            item.scale.setScalar(heldScale);
             item.position.set(0, 0, 0);
             item.rotation.set(0, 0, 0);
         } else {

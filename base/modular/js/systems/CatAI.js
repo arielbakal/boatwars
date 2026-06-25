@@ -115,10 +115,16 @@ export default class CatAI {
     animateLegs(catData, t, freq, amp) {
         if (!catData.legs) return;
         const c = t * freq;
+        // C9: add rotation swing (fore/aft) so legs read as walking, not just bouncing
+        const swingAmp = amp * 1.5;
         catData.legs[0].position.y = 0.1 + Math.sin(c) * amp;
+        catData.legs[0].rotation.x = Math.sin(c) * swingAmp;
         catData.legs[1].position.y = 0.1 + Math.sin(c + Math.PI) * amp;
+        catData.legs[1].rotation.x = Math.sin(c + Math.PI) * swingAmp;
         catData.legs[2].position.y = 0.1 + Math.sin(c + Math.PI) * amp;
+        catData.legs[2].rotation.x = Math.sin(c + Math.PI) * swingAmp;
         catData.legs[3].position.y = 0.1 + Math.sin(c) * amp;
+        catData.legs[3].rotation.x = Math.sin(c) * swingAmp;
     }
 
     resetLegs(catData) {

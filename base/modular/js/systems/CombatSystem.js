@@ -35,6 +35,8 @@ export default class CombatSystem {
         }
 
         this._updateFlashTimers(dt);
+        this._updateDyingEntities(dt, ctx); // C9: process scale-down deaths
+        this._updateKnockback(dt, ctx);     // C7: lerp-based knockback
 
         if (state.isDead) {
             this._updateDeathRespawn(dt, state);
@@ -148,15 +150,15 @@ export default class CombatSystem {
 
         this._flashEntity(entity, 0xff0000, 0.2);
 
-        // 3D knockback away from player
+        // C7: Lerp-based knockback — store target, interpolate over ~4 frames
         const dir = entity.position.clone().sub(state.player.pos).normalize();
         const planet = entity.userData.planet;
         if (planet) {
-            const newPos = SphericalUtils.moveOnSurface(entity.position, dir, 0.8, planet);
-            entity.position.copy(newPos);
+            entity.userData._knockTarget = SphericalUtils.moveOnSurface(entity.position, dir, 0.8, planet);
         } else {
-            entity.position.add(dir.multiplyScalar(0.8));
+            entity.userData._knockTarget = entity.position.clone().add(dir.multiplyScalar(0.8));
         }
+        entity.userData._knockTimer = 0.07; // ~4 frames at 60fps
 
         entity.userData.aggroTimer = CREATURE_AGGRO_DURATION;
 
@@ -184,12 +186,10 @@ export default class CombatSystem {
                 state.statBoosts.push(boost);
             }
 
-            world.remove(entity);
-            const idx = state.entities.indexOf(entity);
-            if (idx > -1) state.entities.splice(idx, 1);
-            if (state.obstacles.includes(entity)) {
-                state.obstacles.splice(state.obstacles.indexOf(entity), 1);
-            }
+            // C9: Brief scale-down before removal for visual death feel
+            entity.userData._dying = true;
+            entity.userData._dyingTimer = 0.15; // seconds to shrink
+            entity.userData._dyingBaseScale = entity.scale.x; // capture current scale
         }
     }
 
@@ -212,6 +212,40 @@ export default class CombatSystem {
                     mat.emissive.setHex(orig);
                 }
                 this._flashTimers.splice(i, 1);
+            }
+        }
+    }
+
+    // C7: Advance knockback lerp each frame
+    _updateKnockback(dt, ctx) {
+        const { state } = ctx;
+        for (const e of state.entities) {
+            if (!e.userData._knockTarget || !e.userData._knockTimer) continue;
+            e.userData._knockTimer -= dt;
+            // Lerp toward knock target; ~0.4 per frame at 60fps ≈ 4-frame travel
+            e.position.lerp(e.userData._knockTarget, 0.4);
+            if (e.userData._knockTimer <= 0) {
+                e.position.copy(e.userData._knockTarget);
+                e.userData._knockTarget = null;
+                e.userData._knockTimer = 0;
+            }
+        }
+    }
+
+    // C9: Shrink dying entities to 0 over a short timer then remove them
+    _updateDyingEntities(dt, ctx) {
+        const { state, world } = ctx;
+        for (let i = state.entities.length - 1; i >= 0; i--) {
+            const e = state.entities[i];
+            if (!e.userData._dying) continue;
+            e.userData._dyingTimer -= dt;
+            const progress = 1 - Math.max(0, e.userData._dyingTimer / 0.15);
+            const s = Math.max(0, 1 - progress);
+            e.scale.setScalar(s * (e.userData._dyingBaseScale || 1));
+            if (e.userData._dyingTimer <= 0) {
+                world.remove(e);
+                state.entities.splice(i, 1);
+                if (state.obstacles.includes(e)) state.obstacles.splice(state.obstacles.indexOf(e), 1);
             }
         }
     }

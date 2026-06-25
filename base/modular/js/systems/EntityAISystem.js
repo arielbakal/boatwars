@@ -36,16 +36,21 @@ export default class EntityAISystem {
                     const basePos = planet.center.clone().add(normal.clone().multiplyScalar(terrainRadius + (e.userData.heightOffset || 2.2)));
                     e.position.copy(basePos).add(normal.clone().multiplyScalar(Math.sin(time) * 0.1));
                 }
+                // C9: arms 180° out of phase (was sin/cos = 90° shimmy)
                 if (e.userData.lArm) e.userData.lArm.rotation.x = Math.sin(time) * 0.15;
-                if (e.userData.rArm) e.userData.rArm.rotation.x = Math.cos(time) * 0.15;
+                if (e.userData.rArm) e.userData.rArm.rotation.x = -Math.sin(time) * 0.15;
                 if (e.userData.legs) {
                     e.userData.legs.forEach((leg, idx) => {
                         leg.scale.y = 1 + Math.sin(time + idx) * 0.05;
                     });
                 }
                 if (state.player.pos.distanceTo(e.position) < 15) {
+                    // C9: slerp head toward player instead of instant lookAt
                     const targetPos = state.player.pos.clone();
-                    e.lookAt(targetPos);
+                    const tmpObj = new THREE.Object3D();
+                    tmpObj.position.copy(e.position);
+                    tmpObj.lookAt(targetPos);
+                    e.quaternion.slerp(tmpObj.quaternion, 0.05);
                 }
             }
 
@@ -111,7 +116,7 @@ export default class EntityAISystem {
                 const basePos = planet.center.clone().add(normal.clone().multiplyScalar(planet.radius + bobHeight));
                 f.position.copy(basePos);
             }
-            f.rotation.y += 0.02;
+            f.rotation.y += 0.02 * (dt * 60); // C6: dt-normalized (tuned at 60 FPS)
         });
     }
 
@@ -217,10 +222,14 @@ export default class EntityAISystem {
         const { state, world, audio, factory, t } = context;
 
         e.userData.hatchTimer = (e.userData.hatchTimer || EGG_HATCH_TIME) - dt;
-        // Wobble locally
-        const wobble = Math.sin(t * 5) * 0.1 * (1 - e.userData.hatchTimer / EGG_HATCH_TIME);
-        // Apply wobble as local rotation around a tangent axis
-        // (simplified - just add to existing quaternion)
+        // C4: Wobble grows stronger as egg approaches hatching (hatchTimer → 0).
+        const hatchProgress = 1 - Math.max(0, e.userData.hatchTimer / EGG_HATCH_TIME);
+        const wobble = Math.sin(t * 5 + (e.userData.wobblePhase || 0)) * 0.1 * hatchProgress;
+        // Apply wobble as a local rotation around the egg's X axis (tangent to surface normal)
+        // We store a wobble child or reuse the egg mesh's first child (the egg mesh itself).
+        // Since eggs are single-mesh groups, apply to the group's local X rotation.
+        // The surface orientation is in e.quaternion; local X wobble looks like a side-to-side rock.
+        e.rotation.x = wobble; // local X in the egg's surface-aligned frame
 
         if (e.userData.hatchTimer <= 0) {
             audio.pop();

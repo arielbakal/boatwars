@@ -25,7 +25,7 @@ export default class ParticleSystem {
                 p.userData.vel.z -= normal.z * gravity;
             }
 
-            p.userData.life -= 0.03;
+            p.userData.life -= 0.03 * (dt * 60); // C6: dt-normalized (tuned at 60 FPS)
             p.material.opacity = p.userData.life;
             if (p.userData.life <= 0) {
                 world.remove(p);
@@ -49,11 +49,13 @@ export default class ParticleSystem {
                 }
 
                 if (d.userData.rotVel) {
-                    d.rotation.x += d.userData.rotVel.x;
-                    d.rotation.y += d.userData.rotVel.y;
-                    d.rotation.z += d.userData.rotVel.z;
+                    // C6: dt-normalize debris rotation (tuned at 60 FPS)
+                    d.rotation.x += d.userData.rotVel.x * (dt * 60);
+                    d.rotation.y += d.userData.rotVel.y * (dt * 60);
+                    d.rotation.z += d.userData.rotVel.z * (dt * 60);
                 }
-                d.scale.multiplyScalar(0.98);
+                // C6: dt-normalize scale decay (tuned at 60 FPS)
+                d.scale.multiplyScalar(Math.pow(0.98, dt * 60));
                 if (d.scale.x < 0.01 || d.position.length() > 500) {
                     world.remove(d);
                     factory.disposeHierarchy(d);

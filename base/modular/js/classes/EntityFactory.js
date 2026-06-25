@@ -397,7 +397,8 @@ export default class EntityFactory {
         }
 
         g.position.set(x, 0, z);
-        g.userData = { type: 'gold_rock', radius: 0.8 * scale, color: p.baseRock, heightOffset: 0.2 * scale };
+        // BONUS: match rock heightOffset fix from Phase 1 so gold rocks sit flush on surface
+        g.userData = { type: 'gold_rock', radius: 0.8 * scale, color: p.baseRock, heightOffset: 0.35 + 0.2 * scale };
         this.state.obstacles.push(g);
         return g;
     }
