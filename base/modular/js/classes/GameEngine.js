@@ -25,6 +25,8 @@ import NetworkManager from '../network/NetworkManager.js';
 import RemotePlayerManager from '../network/RemotePlayerManager.js';
 import SeededRandom from '../network/SeededRandom.js';
 
+import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE } from '../constants.js';
+
 export default class GameEngine {
     constructor() {
         this.audio = new AudioManager();
@@ -337,6 +339,7 @@ export default class GameEngine {
             c.userData.boundCenter = planet1.center.clone();
             c.userData.boundRadius = planet1.radius * 0.85;
             c.userData.planet = planet1;
+            this._applyTier(c, 0); // constants.PLANETS[0] STARTING PLANET
             this.state.entities.push(c); this.world.add(c);
         }
         // Chief
@@ -407,6 +410,7 @@ export default class GameEngine {
             c.userData.boundCenter = planet2.center.clone();
             c.userData.boundRadius = planet2.radius * 0.85;
             c.userData.planet = planet2;
+            this._applyTier(c, 1); // constants.PLANETS[1] FLORA WORLD
             this.state.entities.push(c); this.world.add(c);
         }
 
@@ -482,6 +486,7 @@ export default class GameEngine {
             c.userData.boundCenter = planet3.center.clone();
             c.userData.boundRadius = planet3.radius * 0.85;
             c.userData.planet = planet3;
+            this._applyTier(c, 2); // constants.PLANETS[2] ANCIENT PEAKS
             this.state.entities.push(c); this.world.add(c);
         }
         for (let i = 0; i < 2; i++) {
@@ -491,6 +496,7 @@ export default class GameEngine {
             c.userData.boundCenter = planet3.center.clone();
             c.userData.boundRadius = planet3.radius * 0.85;
             c.userData.planet = planet3;
+            this._applyTier(c, 2); // constants.PLANETS[2] ANCIENT PEAKS
             this.state.entities.push(c); this.world.add(c);
         }
 
@@ -545,6 +551,7 @@ export default class GameEngine {
             c.userData.boundCenter = planet4.center.clone();
             c.userData.boundRadius = planet4.radius * 0.85;
             c.userData.planet = planet4;
+            this._applyTier(c, 3); // constants.PLANETS[3] ROCKY OUTPOST
             this.state.entities.push(c); this.world.add(c);
         }
 
@@ -599,6 +606,7 @@ export default class GameEngine {
             c.userData.boundCenter = planet5.center.clone();
             c.userData.boundRadius = planet5.radius * 0.85;
             c.userData.planet = planet5;
+            this._applyTier(c, 4); // constants.PLANETS[4] DISTANT WORLD
             this.state.entities.push(c); this.world.add(c);
         }
 
@@ -667,6 +675,19 @@ export default class GameEngine {
 
     get _nearestBoat() {
         return this.boatSystem ? this.boatSystem.nearestBoat : null;
+    }
+
+    /**
+     * A4: apply a planet's difficulty tier to a freshly spawned creature. planetIndex
+     * matches the entry in constants.PLANETS (order: Starting, Flora, Ancient Peaks,
+     * Rocky Outpost, Distant World). Multipliers are static — deterministic, no RNG.
+     */
+    _applyTier(creature, planetIndex) {
+        const tier = PLANETS[planetIndex].tier;
+        const mod = TIER_MODIFIERS[tier];
+        creature.userData.hp *= mod.hp;
+        creature.userData.contactDamage = CREATURE_CONTACT_DAMAGE * mod.dmg;
+        creature.userData.aggroMult = mod.aggro;
     }
 
     repairShip() {

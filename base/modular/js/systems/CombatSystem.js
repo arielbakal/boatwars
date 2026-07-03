@@ -313,7 +313,9 @@ export default class CombatSystem {
 
             if (dist < contactDist) {
                 e.userData.contactCooldown = CREATURE_CONTACT_COOLDOWN;
-                this._damagePlayer(CREATURE_CONTACT_DAMAGE, ctx, e.position);
+                // A4: creatures spawned via GameEngine._applyTier stamp a tier-scaled
+                // contactDamage; fall back to the base constant if it's unset.
+                this._damagePlayer(e.userData.contactDamage || CREATURE_CONTACT_DAMAGE, ctx, e.position);
             }
         }
     }

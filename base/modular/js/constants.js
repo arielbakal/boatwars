@@ -136,11 +136,20 @@ export const MINE_DROP_COUNT = 3;
 // Planet definitions (replaces ISLANDS)
 // Each planet is a sphere in 3D space with a radius
 export const PLANETS = [
-    { name: "STARTING PLANET", x: 0, y: 0, z: 0, radius: 15, hasAtmosphere: true, palette: null },
-    { name: "FLORA WORLD", x: 100, y: 30, z: 0, radius: 18, hasAtmosphere: false, palette: null },
-    { name: "ANCIENT PEAKS", x: 0, y: -20, z: 140, radius: 30, hasAtmosphere: false, palette: 'blue' },
-    { name: "ROCKY OUTPOST", x: -110, y: 40, z: -60, radius: 14, hasAtmosphere: false, palette: null },
-    { name: "DISTANT WORLD", x: 60, y: -50, z: -120, radius: 16, hasAtmosphere: false, palette: null }
+    { name: "STARTING PLANET", x: 0, y: 0, z: 0, radius: 15, hasAtmosphere: true, palette: null, tier: 0 },
+    { name: "FLORA WORLD", x: 100, y: 30, z: 0, radius: 18, hasAtmosphere: false, palette: null, tier: 1 },
+    { name: "ANCIENT PEAKS", x: 0, y: -20, z: 140, radius: 30, hasAtmosphere: false, palette: 'blue', tier: 3 },
+    { name: "ROCKY OUTPOST", x: -110, y: 40, z: -60, radius: 14, hasAtmosphere: false, palette: null, tier: 2 },
+    { name: "DISTANT WORLD", x: 60, y: -50, z: -120, radius: 16, hasAtmosphere: false, palette: null, tier: 2 }
+];
+
+// Per-tier creature difficulty multipliers (index = PLANETS[].tier). Deterministic —
+// static lookup applied at spawn time, no RNG involved.
+export const TIER_MODIFIERS = [
+    { hp: 1, dmg: 1, aggro: 0.5 },
+    { hp: 1.3, dmg: 1.25, aggro: 1 },
+    { hp: 1.6, dmg: 1.5, aggro: 1.5 },
+    { hp: 2, dmg: 2, aggro: 2 }
 ];
 
 // Legacy island definitions (kept for reference)
