@@ -45,16 +45,16 @@ export default class EntityFactory {
         const shape = creatureShapes[shapeIndex];
         const speciesType = shape === 'box' ? 'blocky' : shape === 'sphere' ? 'blobby' : 'conehead';
         const speciesStats = {
-            blobby: { scaleMin: 0.7, scaleMax: 1.0, speed: 0.04 },
-            blocky: { scaleMin: 0.9, scaleMax: 1.4, speed: 0.03 },
-            conehead: { scaleMin: 1.2, scaleMax: 1.8, speed: 0.02 }
+            blobby: { scaleMin: 0.7, scaleMax: 1.0, speed: 0.04, temperament: 1.0 },
+            blocky: { scaleMin: 0.9, scaleMax: 1.4, speed: 0.03, temperament: 1.5 },
+            conehead: { scaleMin: 1.2, scaleMax: 1.8, speed: 0.02, temperament: 0.5 }
         };
         const stats = speciesStats[speciesType];
         return {
             tree: { shape: ['cone', 'box', 'round', 'cylinder'][Math.floor(Math.random() * 4)], heightMod: 1.2 + Math.random() * 1.0, thickMod: 0.6 + Math.random() },
             bush: { shape: ['sphere', 'cone'][Math.floor(Math.random() * 2)], scaleY: 0.7 + Math.random() * 0.5 },
             rock: { shape: ['ico', 'box', 'dodec', 'slab'][Math.floor(Math.random() * 4)], stretch: 0.8 + Math.random() * 0.8 },
-            creature: { shape: shape, speciesType: speciesType, eyes: eyeCount, scale: stats.scaleMin + Math.random() * (stats.scaleMax - stats.scaleMin), eyeScale: 1.0 + Math.random() * 0.6, moveSpeed: stats.speed },
+            creature: { shape: shape, speciesType: speciesType, eyes: eyeCount, scale: stats.scaleMin + Math.random() * (stats.scaleMax - stats.scaleMin), eyeScale: 1.0 + Math.random() * 0.6, moveSpeed: stats.speed, temperament: stats.temperament },
             grass: { height: 0.3 + Math.random() * 0.5 }
         };
     }
@@ -498,9 +498,9 @@ export default class EntityFactory {
             speciesType = ['blobby', 'blocky', 'conehead'][Math.floor(Math.random() * 3)];
         }
         const speciesStats = {
-            blobby: { shape: 'sphere', scaleMin: 0.7, scaleMax: 1.0, speed: 0.04 },
-            blocky: { shape: 'box', scaleMin: 0.9, scaleMax: 1.4, speed: 0.03 },
-            conehead: { shape: 'cone', scaleMin: 1.2, scaleMax: 1.8, speed: 0.02 }
+            blobby: { shape: 'sphere', scaleMin: 0.7, scaleMax: 1.0, speed: 0.04, temperament: 1.0 },
+            blocky: { shape: 'box', scaleMin: 0.9, scaleMax: 1.4, speed: 0.03, temperament: 1.5 },
+            conehead: { shape: 'cone', scaleMin: 1.2, scaleMax: 1.8, speed: 0.02, temperament: 0.5 }
         };
         const stats = speciesStats[speciesType];
         const colorVar = Math.random() * 0.15;
@@ -513,7 +513,8 @@ export default class EntityFactory {
             eyeCount: eyeCount,
             scale: stats.scaleMin + Math.random() * (stats.scaleMax - stats.scaleMin),
             eyeScale: 1.0 + Math.random() * 0.6,
-            moveSpeed: stats.speed
+            moveSpeed: stats.speed,
+            temperament: stats.temperament
         };
     }
 
@@ -524,7 +525,8 @@ export default class EntityFactory {
             speciesType: this.state.worldDNA.creature.speciesType,
             eyeCount: this.state.worldDNA.creature.eyes, scale: this.state.worldDNA.creature.scale,
             eyeScale: this.state.worldDNA.creature.eyeScale,
-            moveSpeed: this.state.worldDNA.creature.moveSpeed
+            moveSpeed: this.state.worldDNA.creature.moveSpeed,
+            temperament: this.state.worldDNA.creature.temperament
         };
         const bodyShape = dna.bodyShape;
         const scale = dna.scale || 1.0;
@@ -589,6 +591,8 @@ export default class EntityFactory {
             moveSpeed: moveSpeed, hopOffset: Math.random() * 100,
             color: dna.color, bubble: null, style: dna, targetScale: scale, cooldown: 0,
             hp: 6, aggroTimer: 0, contactCooldown: 0,
+            // A1: per-species temperament drives ambient aggro chance (static lookup, no RNG)
+            temperament: dna.temperament !== undefined ? dna.temperament : 1.0,
             heightOffset: 0.3
         };
         return g;

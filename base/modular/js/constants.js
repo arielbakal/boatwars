@@ -155,6 +155,8 @@ export const CREATURE_HP = 6;
 export const CREATURE_CONTACT_DAMAGE = 2;
 export const CREATURE_CONTACT_COOLDOWN = 1.0;
 export const CREATURE_AGGRO_DURATION = 5.0;
+export const AGGRO_RANGE = 6;             // proximity radius (world units) for ambient aggro rolls
+export const AGGRO_BASE_CHANCE = 0.25;    // probability per second at temperament 1.0
 
 // Death / respawn
 export const RESPAWN_INVINCIBILITY = 3.0;

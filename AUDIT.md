@@ -106,7 +106,7 @@ Other dead code noted (not blocking): `#log-count` HUD never updated (wired in S
 
 ## Strategy A — implementation scope (in progress)
 
-- [ ] **A1 Ambient aggro:** proximity + per-second chance roll in `EntityAISystem.updateCreature`; per-species temperament; scaled by planet tier.
+- [x] **A1 Ambient aggro:** proximity + per-second chance roll in `EntityAISystem.updateCreature`; per-species temperament; scaled by planet tier.
 - [ ] **A2 Discoverable crafting:** wire `#log-count` HUD to wood count; correct hint copy; contextual prompt on first wood pickup explaining log placement → ship assembly.
 - [ ] **A3 Gold + ship loop:** `gold_rock` drops distinct `gold` item; planet collisions damage ship health (impact-speed scaled); repair ship with gold via interact key; degraded max speed when damaged.
 - [ ] **A4 Planet tiers:** per-planet creature HP/damage multipliers and aggro aggressiveness in `constants.PLANETS`, tuned by distance from start (planet 1 docile → planet 3 dangerous/rewarding).

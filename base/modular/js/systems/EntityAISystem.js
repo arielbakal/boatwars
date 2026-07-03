@@ -5,7 +5,8 @@
 import {
     CREATURE_HUNGER_RATE, CREATURE_HUNGER_WARN, CREATURE_HUNGER_DEATH,
     CREATURE_BREED_EAT_THRESHOLD, CREATURE_BREED_AGE, CREATURE_WANDER_RADIUS,
-    FOOD_PRODUCTION_TIME, EGG_HATCH_TIME, MAX_CREATURES, MAX_FOODS
+    FOOD_PRODUCTION_TIME, EGG_HATCH_TIME, MAX_CREATURES, MAX_FOODS,
+    AGGRO_RANGE, AGGRO_BASE_CHANCE, CREATURE_AGGRO_DURATION
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
 
@@ -130,6 +131,21 @@ export default class EntityAISystem {
 
         e.userData.age = (e.userData.age || 0) + dt;
         e.userData.hunger = (e.userData.hunger || 0) + dt * CREATURE_HUNGER_RATE;
+
+        // A1: ambient aggro — creatures can turn hostile unprovoked when the player
+        // lingers nearby, reusing the same aggroTimer that _damageEntity sets on hit.
+        // AGGRO_RANGE (6) is tiny next to the gap between any two planets, so the
+        // distance check alone keeps this planet-local without an explicit planet match.
+        if ((!e.userData.aggroTimer || e.userData.aggroTimer <= 0) && !state.isDead && state.invincibleTimer <= 0) {
+            const distToPlayer = e.position.distanceTo(state.player.pos);
+            if (distToPlayer < AGGRO_RANGE) {
+                const temperament = e.userData.temperament !== undefined ? e.userData.temperament : 1.0;
+                const tierAggroMult = e.userData.aggroMult !== undefined ? e.userData.aggroMult : 1.0;
+                if (Math.random() < AGGRO_BASE_CHANCE * temperament * tierAggroMult * dt) {
+                    e.userData.aggroTimer = CREATURE_AGGRO_DURATION;
+                }
+            }
+        }
 
         if (!e.userData.aggroTimer || e.userData.aggroTimer <= 0) {
             let nearestFood = null, minDist = Infinity;
