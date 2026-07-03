@@ -659,7 +659,7 @@ export default class GameEngine {
     }
 
     boardBoat(boat) {
-        const ctx = { state: this.state, audio: this.audio, playerCat: this.playerCat };
+        const ctx = { state: this.state, audio: this.audio, playerCat: this.playerCat, playerController: this.playerController };
         this.boatSystem.boardBoat(boat, ctx);
     }
 

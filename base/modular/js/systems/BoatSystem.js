@@ -46,7 +46,7 @@ export default class BoatSystem {
     // ===========================================
 
     boardBoat(boat, context) {
-        const { state, audio, playerCat } = context;
+        const { state, audio, playerCat, playerController } = context;
         state.isBoardingBoat = true;
         state.boardingPhase = 0;
         state.boardingProgress = 0;
@@ -57,6 +57,14 @@ export default class BoatSystem {
         this.boatPromptVisible = false;
         const repairHint = document.getElementById('repair-hint');
         if (repairHint) repairHint.style.display = 'none';
+        // Ship views (boarding walk-up, chase cam while flying) always show the full
+        // body regardless of the player's on-foot first/third preference — the on-foot
+        // updateCamera() that normally hides body parts for first person doesn't run
+        // again until isOnBoat/isBoardingBoat both clear on disembark, so without this
+        // a player who boards while in first person would stay bodiless throughout.
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) crosshair.style.display = 'none';
+        if (playerController) playerController.setBodyVisible(true);
         // InventoryManager.update() (which ticks the craft hint's timer) early-returns
         // while isOnBoat/isBoardingBoat, so a visible hint would otherwise freeze on
         // screen for the whole flight instead of auto-hiding. Its timer resumes and
