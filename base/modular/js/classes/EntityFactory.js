@@ -375,7 +375,16 @@ export default class EntityFactory {
     createGoldRock(p, x, z, scale = 1.0) {
         const g = new THREE.Group();
         const stoneMat = this.getMat(p.baseRock.clone().lerp(new THREE.Color(0x444444), 0.5));
-        const goldMat = this.getMat(0xffd700, false);
+        // Emissive glow (moderate intensity, matches the stat-boost crystal glow elsewhere)
+        // so ore chunks read as "glowing gold" and are spottable from a distance instead
+        // of blending into the rock — gold only spawns on Ancient Peaks and players had
+        // no visual cue to notice it.
+        const goldMat = new THREE.MeshToonMaterial({
+            color: 0xffd700,
+            flatShading: false,
+            emissive: 0xffd700,
+            emissiveIntensity: 0.6
+        });
 
         const rockGeo = new THREE.DodecahedronGeometry(0.8 * scale, 0);
         const rock = new THREE.Mesh(rockGeo, stoneMat);

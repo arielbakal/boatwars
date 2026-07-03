@@ -353,14 +353,29 @@ export default class BoatSystem {
     /**
      * Show "Press R to repair" while on foot near a damaged, landed ship the
      * player has gold for. Reuses the proximity detection from updateProximity.
+     *
+     * When the ship needs repair but the player has no gold, repurpose the same
+     * hint element to point them at gold instead of showing a prompt they can't
+     * act on. Gold ore only spawns on Ancient Peaks (constants.PLANETS[2]), but
+     * planet names are never surfaced anywhere in the UI (no HUD/banner reads
+     * PLANETS[].name or islands[].name) — a name the player has never seen would
+     * be meaningless, so the hint describes the planet instead ("the giant
+     * mountain planet", matching its mountain + golem landmark).
      */
     _updateRepairHint(state, boat) {
         const hint = document.getElementById('repair-hint');
         if (!hint) return;
         const stats = boat && boat.userData.stats;
-        const canRepair = stats && stats.health < (stats.maxHealth || SHIP_HEALTH) &&
-            state.inventory.some(it => it && it.type === 'gold' && it.count > 0);
-        hint.style.display = canRepair ? 'block' : 'none';
+        const isDamaged = !!(stats && stats.health < (stats.maxHealth || SHIP_HEALTH));
+        if (!isDamaged) {
+            hint.style.display = 'none';
+            return;
+        }
+        const hasGold = state.inventory.some(it => it && it.type === 'gold' && it.count > 0);
+        hint.textContent = hasGold
+            ? 'Press R to repair ship (1 Gold = +25 HP)'
+            : 'No gold — mine glowing ore on the giant mountain planet';
+        hint.style.display = 'block';
     }
 
     // ===========================================
