@@ -34,9 +34,11 @@ export default class InputHandler {
             if (k === 'd') state.inputs.d = true;
             if (k === ' ') state.inputs.space = true;
             if (k === 'shift') state.inputs.shift = true;
-            // Ship pitch — nose up/down (Arrow keys or R/F)
-            if (k === 'arrowup' || k === 'r') { state.inputs.pitchUp = true; if (state.isOnBoat) e.preventDefault(); }
-            if (k === 'arrowdown' || k === 'f') { state.inputs.pitchDown = true; if (state.isOnBoat) e.preventDefault(); }
+            // Ship pitch — nose up/down (Arrow keys or R/F). Only while on a boat: R
+            // doubles as the on-foot repair key, so setting pitchUp unconditionally
+            // would leave it stuck true if the player boards mid-hold (before keyup).
+            if ((k === 'arrowup' || k === 'r') && state.isOnBoat) { state.inputs.pitchUp = true; e.preventDefault(); }
+            if ((k === 'arrowdown' || k === 'f') && state.isOnBoat) { state.inputs.pitchDown = true; e.preventDefault(); }
             // Inventory slots
             const idx = parseInt(k) - 1;
             if (idx >= 0 && idx < 8) {
@@ -77,8 +79,9 @@ export default class InputHandler {
                 }
             }
             // R to repair a nearby landed ship with gold (on foot only — while
-            // flying, R/ArrowUp already means ship pitch-up, handled above)
-            if (k === 'r' && state.phase === 'playing' && !state.isOnBoat && !state.isBoardingBoat) {
+            // flying, R/ArrowUp already means ship pitch-up, handled above).
+            // Guard against OS key auto-repeat so holding R doesn't cascade-drain gold.
+            if (k === 'r' && state.phase === 'playing' && !state.isOnBoat && !state.isBoardingBoat && !e.repeat) {
                 this.engine.repairShip();
             }
         });
