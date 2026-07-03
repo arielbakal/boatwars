@@ -15,6 +15,16 @@ function easeInOutQuad(t) {
     return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
 
+// --- Held-tool grip (Minecraft-like) ---
+// Axe/pickaxe handle geometry (EntityFactory.createAxe/createPickaxe) is a cylinder of
+// height 0.5 centered on the group origin, running along local +Y, with the head/blade
+// at the +Y tip. HELD_TOOL_TILT rotates that local Y axis toward local +Z (forward) by
+// this many radians so the head sits up-and-forward from the grip; the same rotation
+// carries local +Z (the axe blade's face) to (0, -sin, cos) — forward and angled slightly
+// down, edge-first — because a rotation preserves the 90 deg between the two axes.
+const HELD_TOOL_TILT = Math.PI / 5; // 36 deg forward from vertical (within the 30-45 deg range)
+const HELD_TOOL_HALF_HANDLE = 0.25; // half of the 0.5-long handle cylinder
+
 export default class PlayerController {
     constructor(world, state) {
         this.world = world;
@@ -101,14 +111,27 @@ export default class PlayerController {
         }
         this.heldItem = item;
         if (item) {
-            // C1: Axe handle is along local +Y; head/blade at +Y tip facing +Z.
-            // We want the handle to run along the forearm (local -Y of the anchor, pointing up)
-            // and the blade to face FORWARD (+Z in player space).
-            // Rotation: tilt the axe so its local +Y aligns with the anchor's local +Z (forward),
-            // then rotate 90° around Z so the blade sweeps outward rather than sideways.
-            // Result: handle along forearm, blade edge pointing +Z (outward/forward).
-            item.rotation.set(-Math.PI / 2, 0, -Math.PI / 4);
-            item.position.set(0, 0, 0);
+            const isHandledTool = item.userData && (item.userData.type === 'axe' || item.userData.type === 'pickaxe');
+            if (isHandledTool) {
+                // Minecraft-like grip: gripped near the handle's LOWER end, head/blade at
+                // the top, handle tilted forward from vertical, blade facing the player's
+                // forward direction. A single rotation about the anchor's local X axis
+                // does this (see HELD_TOOL_TILT comment above) — no yaw/roll needed since
+                // the hand anchor's own axes already match the character's facing.
+                item.rotation.set(HELD_TOOL_TILT, 0, 0);
+                // Move the grip point (local -Y tip of the handle, scaled to match the
+                // tool's held-size scale-up in InputHandler) to the anchor's origin, so
+                // the hand holds the BASE of the handle instead of its midpoint.
+                const halfHandle = HELD_TOOL_HALF_HANDLE * (item.scale.y || 1);
+                item.position.set(
+                    0,
+                    halfHandle * Math.cos(HELD_TOOL_TILT),
+                    halfHandle * Math.sin(HELD_TOOL_TILT)
+                );
+            } else {
+                item.rotation.set(0, 0, 0);
+                item.position.set(0, 0, 0);
+            }
             this.handAnchorR.add(item);
         }
     }
