@@ -57,6 +57,12 @@ export default class BoatSystem {
         this.boatPromptVisible = false;
         const repairHint = document.getElementById('repair-hint');
         if (repairHint) repairHint.style.display = 'none';
+        // InventoryManager.update() (which ticks the craft hint's timer) early-returns
+        // while isOnBoat/isBoardingBoat, so a visible hint would otherwise freeze on
+        // screen for the whole flight instead of auto-hiding. Its timer resumes and
+        // finishes normally once back on foot, so hiding it here is enough.
+        const craftHint = document.getElementById('craft-hint');
+        if (craftHint) craftHint.style.display = 'none';
         audio.sail();
 
         if (playerCat) {
