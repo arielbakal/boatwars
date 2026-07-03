@@ -891,8 +891,19 @@ export default class GameEngine {
                 this.inventorySystem.update(dt, ctx);
             }
 
-            // Update player forward direction for combat targeting
-            state._playerForward = this.playerController.getForward();
+            // Update player forward direction for combat targeting.
+            // First person: read the camera's exact look direction (full 3D, pitch
+            // included) instead of the animated model's facing — the model's yaw is
+            // smoothed (slerp) toward the camera each frame, which is fine visually
+            // but adds a frame or two of lag that makes quick flick-shots whiff. The
+            // crosshair should always hit what it's actually centered on right now.
+            if (state.player.cameraMode === 'first' && !state.isOnBoat) {
+                const aimForward = new THREE.Vector3();
+                camera.getWorldDirection(aimForward);
+                state._playerForward = aimForward;
+            } else {
+                state._playerForward = this.playerController.getForward();
+            }
 
             // Combat
             this.combatSystem.update(dt, ctx);
