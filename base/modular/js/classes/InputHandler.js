@@ -640,11 +640,28 @@ export default class InputHandler {
         }
     }
 
+    /**
+     * Show the center-screen aim reticle only in first person while actually
+     * mouselooking (pointer locked). Not on the ship — boarding/boarding disembark
+     * hides it explicitly (BoatSystem.boardBoat) since this runs only on foot.
+     * Gated on pointer lock so it never doubles up with #custom-cursor, which is
+     * only visible when NOT locked.
+     */
+    _updateCrosshair(state) {
+        const crosshair = document.getElementById('crosshair');
+        if (!crosshair) return;
+        const isLocked = document.pointerLockElement === this.engine.world.renderer.domElement;
+        const show = isLocked && state.player.cameraMode === 'first';
+        crosshair.style.display = show ? 'block' : 'none';
+    }
+
     // Called each frame by GameEngine to check interaction targets
     updateInteraction() {
         const state = this.engine.state;
         if (state.phase !== 'playing') return;
         if (state.isOnBoat) return;
+
+        this._updateCrosshair(state);
 
         const playerPos = state.player.pos;
         const interactRange = 3.0;

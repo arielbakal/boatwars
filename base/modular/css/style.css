@@ -403,8 +403,47 @@ input[type=range] {
     }
 }
 
+/* First-person aim reticle: a center dot plus a thin cross. Shown only while
+   pointer-locked in first person and off the ship (toggled from
+   InputHandler.updateInteraction()); the free-roaming #custom-cursor already
+   hides itself on pointer lock, so the two never show at the same time. */
 #crosshair {
     display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: 4px;
+    height: 4px;
+    margin: -2px 0 0 -2px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+    z-index: 1500;
+}
+
+#crosshair::before,
+#crosshair::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    background: rgba(255, 255, 255, 0.7);
+    box-shadow: 0 0 1px rgba(0, 0, 0, 0.8);
+}
+
+/* Vertical bar */
+#crosshair::before {
+    width: 2px;
+    height: 16px;
+    transform: translate(-50%, -50%);
+}
+
+/* Horizontal bar */
+#crosshair::after {
+    width: 16px;
+    height: 2px;
+    transform: translate(-50%, -50%);
 }
 
 /* Resource HUD */
