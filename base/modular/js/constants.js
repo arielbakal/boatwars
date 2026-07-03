@@ -186,6 +186,12 @@ export const STAT_BOOST_BOB_SPEED = 3.0;
 export const STAT_BOOST_BOB_HEIGHT = 0.3;
 export const STAT_BOOST_SPIN_SPEED = 2.0;
 
+// Essence stat caps (multiples of base stats — clamped on application, still
+// consumes the pickup once capped so there's no new UI needed)
+export const ESSENCE_ATTACK_CAP_MULT = 4;      // attack cap = 4x base attack
+export const ESSENCE_SPEED_BOOST_CAP_MULT = 0.6; // speedBoost cap = +60% of base speed
+export const ESSENCE_MAX_HP_CAP_MULT = 3;      // maxHp cap = 3x base maxHp
+
 // Essence drops from creatures
 export const CREATURE_ESSENCE_MAP = {
     conehead: { stat: 'speed', amount: 0.01 },

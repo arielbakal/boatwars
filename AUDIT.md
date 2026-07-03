@@ -110,6 +110,6 @@ Other dead code noted (not blocking): `#log-count` HUD never updated (wired in S
 - [x] **A2 Discoverable crafting:** wire `#log-count` HUD to wood count; correct hint copy; contextual prompt on first wood pickup explaining log placement → ship assembly.
 - [x] **A3 Gold + ship loop:** `gold_rock` drops distinct `gold` item; planet collisions damage ship health (impact-speed scaled); repair ship with gold via interact key; degraded max speed when damaged.
 - [x] **A4 Planet tiers:** per-planet creature HP/damage multipliers and aggro aggressiveness in `constants.PLANETS`, tuned by distance from start (planet 1 docile → planet 3 dangerous/rewarding).
-- [ ] **A5 Essence caps:** clamp attack/speed/maxHp growth at defined maxima in `CombatSystem`.
+- [x] **A5 Essence caps:** clamp attack/speed/maxHp growth at defined maxima in `CombatSystem`.
 
 Multiplayer note: aggro, ship damage, and repair are client-local state — consistent with current architecture; syncing is Strategy D territory.

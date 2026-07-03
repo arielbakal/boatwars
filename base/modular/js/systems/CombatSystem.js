@@ -4,12 +4,13 @@
 // =====================================================
 
 import {
-    PLAYER_BASE_ATTACK,
+    PLAYER_BASE_ATTACK, PLAYER_SPEED, PLAYER_MAX_HP,
     ATTACK_COOLDOWN, ATTACK_RANGE, ATTACK_ARC,
     CREATURE_CONTACT_DAMAGE, CREATURE_CONTACT_COOLDOWN, CREATURE_AGGRO_DURATION,
     RESPAWN_INVINCIBILITY, PLAYER_RADIUS,
     STAT_BOOST_PICKUP_RANGE, STAT_BOOST_BOB_SPEED, STAT_BOOST_BOB_HEIGHT, STAT_BOOST_SPIN_SPEED,
-    CREATURE_ESSENCE_MAP, ATTACK_SWING_DURATION
+    CREATURE_ESSENCE_MAP, ATTACK_SWING_DURATION,
+    ESSENCE_ATTACK_CAP_MULT, ESSENCE_SPEED_BOOST_CAP_MULT, ESSENCE_MAX_HP_CAP_MULT
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
 
@@ -390,12 +391,17 @@ export default class CombatSystem {
             if (dist < STAT_BOOST_PICKUP_RANGE) {
                 const stat = boost.userData.stat;
                 const amount = boost.userData.amount;
+                // A5: clamp growth at defined caps. The crystal is still consumed
+                // and the pickup FX still plays below — capped stats just stop growing.
                 if (stat === 'attack') {
-                    state.player.attack += amount;
+                    const cap = PLAYER_BASE_ATTACK * ESSENCE_ATTACK_CAP_MULT;
+                    state.player.attack = Math.min(state.player.attack + amount, cap);
                 } else if (stat === 'speed') {
-                    state.player.speedBoost += amount;
+                    const cap = PLAYER_SPEED * ESSENCE_SPEED_BOOST_CAP_MULT;
+                    state.player.speedBoost = Math.min(state.player.speedBoost + amount, cap);
                 } else if (stat === 'health') {
-                    state.player.maxHp += amount;
+                    const cap = PLAYER_MAX_HP * ESSENCE_MAX_HP_CAP_MULT;
+                    state.player.maxHp = Math.min(state.player.maxHp + amount, cap);
                     state.player.hp = Math.min(state.player.hp + amount, state.player.maxHp);
                 }
 
