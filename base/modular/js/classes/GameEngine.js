@@ -688,6 +688,10 @@ export default class GameEngine {
         creature.userData.hp *= mod.hp;
         creature.userData.contactDamage = CREATURE_CONTACT_DAMAGE * mod.dmg;
         creature.userData.aggroMult = mod.aggro;
+        // Keep the hp multiplier itself (not just the scaled hp) so offspring can
+        // re-derive their own tier-scaled hp from their own base hp at hatch time —
+        // using the parent's current (possibly damaged) hp would pass the damage along.
+        creature.userData.tierHpMult = mod.hp;
     }
 
     repairShip() {

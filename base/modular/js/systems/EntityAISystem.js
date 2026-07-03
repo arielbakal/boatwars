@@ -168,6 +168,12 @@ export default class EntityAISystem {
                     audio.layEgg();
                     const egg = factory.createEgg(e.position.clone(), e.userData.color, e.userData.style);
                     egg.userData.planet = planet;
+                    // Inherit the parent's planet-tier stats (stamped by GameEngine._applyTier
+                    // at world-gen spawn) so hatchlings match the difficulty of their planet
+                    // instead of resetting to the factory's default (untiered) baseline.
+                    egg.userData.parentTierHpMult = e.userData.tierHpMult;
+                    egg.userData.parentContactDamage = e.userData.contactDamage;
+                    egg.userData.parentAggroMult = e.userData.aggroMult;
                     state.entities.push(egg);
                     world.add(egg);
                 }
@@ -269,6 +275,12 @@ export default class EntityAISystem {
             baby.scale.set(0.5, 0.5, 0.5);
             baby.userData.targetScale = 0.7 + Math.random() * 0.3;
             baby.userData.planet = e.userData.planet;
+            // Inherit the parent's planet-tier stats (mirrors GameEngine._applyTier) —
+            // without this, hatchlings reset to createCreature's default hp/damage/aggro
+            // regardless of which planet they hatch on.
+            if (e.userData.parentTierHpMult !== undefined) baby.userData.hp *= e.userData.parentTierHpMult;
+            if (e.userData.parentContactDamage !== undefined) baby.userData.contactDamage = e.userData.parentContactDamage;
+            if (e.userData.parentAggroMult !== undefined) baby.userData.aggroMult = e.userData.parentAggroMult;
             if (e.userData.planet) {
                 baby.userData.boundCenter = e.userData.planet.center.clone();
                 baby.userData.boundRadius = e.userData.planet.radius * 0.85;
