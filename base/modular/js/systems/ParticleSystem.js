@@ -12,14 +12,14 @@ export default class ParticleSystem {
         // Particles
         for (let i = state.particles.length - 1; i >= 0; i--) {
             const p = state.particles[i];
-            p.position.add(p.userData.vel);
+            p.position.addScaledVector(p.userData.vel, dt * 60); // C6: dt-normalized position integration (tuned at 60 FPS)
 
             // Gravity toward nearest planet
             const result = SphericalUtils.findNearestPlanet(p.position, state.islands);
             if (result.planet) {
                 const normal = SphericalUtils.getSurfaceNormal(p.position, result.planet);
                 // Pull toward planet center (opposite of normal)
-                const gravity = 0.002;
+                const gravity = 0.002 * (dt * 60); // C6: dt-normalized gravity accumulation (tuned at 60 FPS)
                 p.userData.vel.x -= normal.x * gravity;
                 p.userData.vel.y -= normal.y * gravity;
                 p.userData.vel.z -= normal.z * gravity;
@@ -37,15 +37,16 @@ export default class ParticleSystem {
         for (let i = state.debris.length - 1; i >= 0; i--) {
             const d = state.debris[i];
             if (d.userData.vel) {
-                d.position.add(d.userData.vel);
+                d.position.addScaledVector(d.userData.vel, dt * 60); // C6: dt-normalized position integration (tuned at 60 FPS)
 
                 // Gravity toward nearest planet
                 const result = SphericalUtils.findNearestPlanet(d.position, state.islands);
                 if (result.planet) {
                     const normal = SphericalUtils.getSurfaceNormal(d.position, result.planet);
-                    d.userData.vel.x -= normal.x * 0.01;
-                    d.userData.vel.y -= normal.y * 0.01;
-                    d.userData.vel.z -= normal.z * 0.01;
+                    const gravity = 0.01 * (dt * 60); // C6: dt-normalized gravity accumulation (tuned at 60 FPS)
+                    d.userData.vel.x -= normal.x * gravity;
+                    d.userData.vel.y -= normal.y * gravity;
+                    d.userData.vel.z -= normal.z * gravity;
                 }
 
                 if (d.userData.rotVel) {
