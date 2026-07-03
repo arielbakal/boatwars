@@ -206,6 +206,8 @@ export default class InputHandler {
             this._nearestTool = null;
         } else {
             sfx.pop();
+            // Surface the failure — a silent pop reads as a broken key.
+            this._inventoryFullUntil = performance.now() + 1500;
         }
     }
 
@@ -702,7 +704,10 @@ export default class InputHandler {
         // Show/hide tool hint
         const axeHint = document.getElementById('axe-hint');
         if (axeHint) {
-            if (this._nearestTool) {
+            if (this._inventoryFullUntil && performance.now() < this._inventoryFullUntil) {
+                axeHint.style.display = 'block';
+                axeHint.textContent = 'Inventory full!';
+            } else if (this._nearestTool) {
                 axeHint.style.display = 'block';
                 axeHint.textContent = `Press E to pick up ${this._nearestTool.userData.type}`;
             } else if (selectedType === 'axe' && nearest) {

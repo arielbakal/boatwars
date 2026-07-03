@@ -134,8 +134,11 @@ export default class GameEngine {
     addToInventory(type, color, style, age = 0) {
         const isStackable = ['creature', 'egg'].indexOf(type) === -1;
         if (isStackable) {
+            // Base resources stack by type alone — per-planet palette colors would
+            // otherwise split them into one slot per planet and exhaust the inventory.
+            const stacksByType = ['wood', 'rock', 'gold'].indexOf(type) !== -1;
             const existingIdx = this.state.inventory.findIndex(item =>
-                item && item.type === type && item.color.getHex() === color.getHex()
+                item && item.type === type && (stacksByType || item.color.getHex() === color.getHex())
             );
             if (existingIdx !== -1) {
                 this.state.inventory[existingIdx].count = (this.state.inventory[existingIdx].count || 1) + 1;
