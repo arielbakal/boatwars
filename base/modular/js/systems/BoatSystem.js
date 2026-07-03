@@ -85,6 +85,16 @@ export default class BoatSystem {
         // Initialize 3D state from current ship mesh orientation
         state.shipQuaternion.copy(boat.quaternion);
         state.shipVelocity.set(0, 0, 0);
+        // Root-cause fix: updateBoatPhysics only runs while isOnBoat, so drag never
+        // gets a chance to settle stats.currentSpeed to 0 while the ship sits parked.
+        // A ship that was disembarked mid-taxi (or right after a landing bounce, which
+        // recoils currentSpeed via `*= -0.3`) keeps that stale nonzero speed frozen on
+        // its userData indefinitely. The instant physics resumes here, that residual
+        // speed is fed straight into shipVelocity again, so the "still" parked ship
+        // suddenly lurches/slides for a moment — read by players as boarding jitter.
+        // Zeroing it on every boarding guarantees the ship always resumes from a true
+        // rest state, matching what the player just saw (a motionless, parked ship).
+        if (boat.userData.stats) boat.userData.stats.currentSpeed = 0;
         state.shipCameraMode = 'chase';
 
         // The ship boards while resting on the surface — start grounded (taxi phase).
@@ -200,6 +210,12 @@ export default class BoatSystem {
 
         if (t >= 1) {
             this.finishBoarding(context);
+            // finishBoarding() just handed the camera off to updateBoatPhysics's
+            // _updateCamera (ship chase cam). Returning here avoids also running the
+            // on-foot boarding-camera lerp below in this same frame — two competing
+            // camera.position.lerp() calls in one tick produced a one-frame snap
+            // right at the boarding/flight handoff.
+            return;
         }
 
         // Camera follows during boarding
