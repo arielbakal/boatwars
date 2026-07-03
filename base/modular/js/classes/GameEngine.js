@@ -208,6 +208,7 @@ export default class GameEngine {
         this.state.entities = []; this.state.obstacles = []; this.state.foods = [];
         this.islandGroups.forEach(ig => {
             this.world.remove(ig.group);
+            this.factory.disposeHierarchy(ig.group);
         });
         this.islandGroups = [];
         this.groundPlanes = [];
