@@ -58,7 +58,7 @@ export default class InventoryManager {
                 const d = document.createElement('div');
                 d.style.color = '#' + it.color.getHexString();
                 d.className = `icon-${it.type}`;
-                if (['creature', 'rock', 'grass', 'flower', 'egg'].includes(it.type)) d.style.background = d.style.color;
+                if (['creature', 'rock', 'gold', 'grass', 'flower', 'egg'].includes(it.type)) d.style.background = d.style.color;
                 if (it.type === 'bush') d.style.borderBottomColor = d.style.color;
                 if (it.type === 'wood' || it.type === 'log') d.style.background = d.style.color;
                 if (it.type === 'axe' || it.type === 'pickaxe') d.style.background = d.style.color;
@@ -97,8 +97,8 @@ export default class InventoryManager {
                         state.entities.splice(i, 1);
                     }
                 }
-                if (e.userData.type === 'rock') {
-                    const added = this.addToInventory('rock', e.userData.color, null);
+                if (e.userData.type === 'rock' || e.userData.type === 'gold') {
+                    const added = this.addToInventory(e.userData.type, e.userData.color, null);
                     if (added) {
                         audio.pickup();
                         for (let j = 0; j < 8; j++) factory.createParticle(e.position.clone(), e.userData.color, 0.8);

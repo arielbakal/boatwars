@@ -15,6 +15,9 @@ import {
     SHIP_AUTO_LEVEL_SPEED,
     SHIP_GRAVITY_STRENGTH, SHIP_GRAVITY_RANGE,
     SHIP_TAKEOFF_SPEED, SHIP_TAKEOFF_ALTITUDE, SHIP_GROUND_REST_ALTITUDE,
+    SHIP_COLLISION_DAMAGE_THRESHOLD, SHIP_COLLISION_DAMAGE_AT_FULL_SPEED,
+    SHIP_DAMAGE_SPEED_HP_THRESHOLD, SHIP_DAMAGED_MIN_SPEED_MULT,
+    SHIP_REPAIR_GOLD_COST, SHIP_REPAIR_HEAL_AMOUNT,
     BOARDING_WALK_SPEED, CAT_BOARDING_DELAY,
     CAMERA_DISTANCE_BOAT
 } from '../constants.js';
@@ -52,6 +55,8 @@ export default class BoatSystem {
         state.player.vel.set(0, 0, 0);
         if (this.ui.boatPrompt) this.ui.boatPrompt.style.display = 'none';
         this.boatPromptVisible = false;
+        const repairHint = document.getElementById('repair-hint');
+        if (repairHint) repairHint.style.display = 'none';
         audio.sail();
 
         if (playerCat) {
@@ -283,6 +288,60 @@ export default class BoatSystem {
     }
 
     // ===========================================
+    // DAMAGE / REPAIR
+    // ===========================================
+
+    /**
+     * A3: below SHIP_DAMAGE_SPEED_HP_THRESHOLD, max speed degrades linearly down
+     * to SHIP_DAMAGED_MIN_SPEED_MULT (60%) at 1 HP. Full speed above the threshold.
+     */
+    _getEffectiveMaxSpeed(stats) {
+        if (stats.health >= SHIP_DAMAGE_SPEED_HP_THRESHOLD) return stats.maxSpeed;
+        const t = Math.max(0, (stats.health - 1) / (SHIP_DAMAGE_SPEED_HP_THRESHOLD - 1));
+        const speedMult = SHIP_DAMAGED_MIN_SPEED_MULT + (1 - SHIP_DAMAGED_MIN_SPEED_MULT) * t;
+        return stats.maxSpeed * speedMult;
+    }
+
+    /**
+     * Repair the nearest landed ship using 1 gold from inventory (client-local,
+     * consistent with the rest of ship state — no network message). Returns true
+     * if a repair happened so the caller can refresh the inventory UI/feedback.
+     */
+    repairShip(context) {
+        const { state, audio, factory } = context;
+        const boat = this._nearestBoat;
+        if (!boat || !boat.userData.stats) return false;
+
+        const stats = boat.userData.stats;
+        const maxHealth = stats.maxHealth || SHIP_HEALTH;
+        if (stats.health >= maxHealth) return false;
+
+        const goldIdx = state.inventory.findIndex(it => it && it.type === 'gold');
+        if (goldIdx === -1) return false;
+
+        state.inventory[goldIdx].count -= SHIP_REPAIR_GOLD_COST;
+        if (state.inventory[goldIdx].count <= 0) state.inventory[goldIdx] = null;
+
+        stats.health = Math.min(maxHealth, stats.health + SHIP_REPAIR_HEAL_AMOUNT);
+        audio.pickup();
+        for (let i = 0; i < 10; i++) factory.createParticle(boat.position.clone(), new THREE.Color(0xffd700), 1.0);
+        return true;
+    }
+
+    /**
+     * Show "Press R to repair" while on foot near a damaged, landed ship the
+     * player has gold for. Reuses the proximity detection from updateProximity.
+     */
+    _updateRepairHint(state, boat) {
+        const hint = document.getElementById('repair-hint');
+        if (!hint) return;
+        const stats = boat && boat.userData.stats;
+        const canRepair = stats && stats.health < (stats.maxHealth || SHIP_HEALTH) &&
+            state.inventory.some(it => it && it.type === 'gold' && it.count > 0);
+        hint.style.display = canRepair ? 'block' : 'none';
+    }
+
+    // ===========================================
     // MAIN PHYSICS UPDATE
     // ===========================================
 
@@ -307,6 +366,10 @@ export default class BoatSystem {
         const stats = boat.userData.stats;
         if (isNaN(stats.currentSpeed)) stats.currentSpeed = 0;
         if (isNaN(stats.maxSpeed) || stats.maxSpeed <= 0) stats.maxSpeed = SHIP_MAX_SPEED;
+
+        // A3: damaged hulls fly slower — one clean modifier applied everywhere the
+        // flight model reads max speed, instead of scattering health checks around.
+        const effectiveMaxSpeed = this._getEffectiveMaxSpeed(stats);
 
         // --- Nearest planet (for auto-level reference + HUD altitude) ---
         this._updateNearestPlanet(state, boat.position);
@@ -345,12 +408,12 @@ export default class BoatSystem {
         if (state.inputs.w) {
             stats.currentSpeed = Math.min(
                 stats.currentSpeed + stats.acceleration,
-                stats.maxSpeed
+                effectiveMaxSpeed
             );
         } else if (state.inputs.s) {
             stats.currentSpeed = Math.max(
                 stats.currentSpeed - stats.brake,
-                -stats.maxSpeed * SHIP_REVERSE_FACTOR
+                -effectiveMaxSpeed * SHIP_REVERSE_FACTOR
             );
         } else {
             stats.currentSpeed *= stats.drag;
@@ -426,9 +489,17 @@ export default class BoatSystem {
             if (dist < minDist) {
                 const normal = _tmpVec4.copy(newPos).sub(p.center).normalize();
                 boat.position.copy(p.center).addScaledVector(normal, minDist);
-                // Only recoil/sfx for a genuine impact, not a resting taxi contact.
+                // Only recoil/sfx/damage for a genuine impact, not a resting taxi contact.
                 if (!state.shipGrounded && Math.abs(stats.currentSpeed) > 0.02) {
                     audio.pop();
+                    // A3: impacts above SHIP_COLLISION_DAMAGE_THRESHOLD of max speed
+                    // damage the hull, scaled so a full-speed head-on hit costs
+                    // ~SHIP_COLLISION_DAMAGE_AT_FULL_SPEED HP. The ship is never destroyed.
+                    const impactSpeed = Math.abs(stats.currentSpeed);
+                    if (impactSpeed > stats.maxSpeed * SHIP_COLLISION_DAMAGE_THRESHOLD) {
+                        const dmg = (impactSpeed / stats.maxSpeed) * SHIP_COLLISION_DAMAGE_AT_FULL_SPEED;
+                        stats.health = Math.max(1, stats.health - dmg);
+                    }
                     stats.currentSpeed *= -0.3; // small bounce back
                 }
                 state.shipVelocity.set(0, 0, 0);
@@ -604,6 +675,7 @@ export default class BoatSystem {
             this.boatPromptVisible = false;
         }
         this._nearestBoat = nearBoat;
+        this._updateRepairHint(state, nearBoat);
     }
 
     // ===========================================

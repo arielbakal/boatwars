@@ -162,7 +162,7 @@ export default class GameEngine {
                 const d = document.createElement('div');
                 d.style.color = '#' + it.color.getHexString();
                 d.className = `icon-${it.type}`;
-                if (['creature', 'rock', 'grass', 'flower', 'egg'].includes(it.type)) d.style.background = d.style.color;
+                if (['creature', 'rock', 'gold', 'grass', 'flower', 'egg'].includes(it.type)) d.style.background = d.style.color;
                 if (it.type === 'bush') d.style.borderBottomColor = d.style.color;
                 if (it.type === 'wood' || it.type === 'log') d.style.background = d.style.color;
                 if (it.type === 'axe' || it.type === 'pickaxe') d.style.background = d.style.color;
@@ -667,6 +667,13 @@ export default class GameEngine {
 
     get _nearestBoat() {
         return this.boatSystem ? this.boatSystem.nearestBoat : null;
+    }
+
+    repairShip() {
+        const ctx = { state: this.state, audio: this.audio, factory: this.factory };
+        const repaired = this.boatSystem.repairShip(ctx);
+        if (repaired) this.updateInventory();
+        return repaired;
     }
 
     updateIslandIndicator() {

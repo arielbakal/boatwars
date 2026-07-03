@@ -76,6 +76,11 @@ export default class InputHandler {
                     this.engine.boardBoat(this.engine._nearestBoat);
                 }
             }
+            // R to repair a nearby landed ship with gold (on foot only — while
+            // flying, R/ArrowUp already means ship pitch-up, handled above)
+            if (k === 'r' && state.phase === 'playing' && !state.isOnBoat && !state.isBoardingBoat) {
+                this.engine.repairShip();
+            }
         });
         document.addEventListener('keyup', (e) => {
             const k = e.key.toLowerCase();

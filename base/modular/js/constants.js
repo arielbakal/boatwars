@@ -56,6 +56,16 @@ export const SHIP_YAW_SPEED = 0.02;
 export const SHIP_HEALTH = 100;
 export const SHIP_TURN_SPEED = 0.02;
 
+// Spaceship collision damage
+export const SHIP_COLLISION_DAMAGE_THRESHOLD = 0.3;   // fraction of max speed above which impacts damage the ship
+export const SHIP_COLLISION_DAMAGE_AT_FULL_SPEED = 30; // HP lost on a full-speed head-on hit
+export const SHIP_DAMAGE_SPEED_HP_THRESHOLD = 50;      // below this health, max speed starts degrading
+export const SHIP_DAMAGED_MIN_SPEED_MULT = 0.6;        // effective max speed fraction at 1 HP
+
+// Spaceship repair
+export const SHIP_REPAIR_GOLD_COST = 1;    // gold consumed per repair
+export const SHIP_REPAIR_HEAL_AMOUNT = 25; // HP restored per repair
+
 // Spaceship gravity
 export const SHIP_GRAVITY_STRENGTH = 0.002;    // gravity acceleration at the surface (added each frame)
 export const SHIP_GRAVITY_RANGE = 4.0;         // gravity acts within this multiple of planet radius

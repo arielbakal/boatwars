@@ -240,6 +240,7 @@ input[type=range] {
 
 .icon-creature,
 .icon-rock,
+.icon-gold,
 .icon-grass,
 .icon-flower,
 .icon-egg {
@@ -252,7 +253,8 @@ input[type=range] {
     box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
 }
 
-.icon-rock {
+.icon-rock,
+.icon-gold {
     width: 16px;
     height: 16px;
     transform: rotate(45deg);

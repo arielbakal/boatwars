@@ -59,12 +59,14 @@ export default class MineSystem {
                     ? new THREE.Color(0xffd700)
                     : (rock.userData.color || new THREE.Color(0x888888));
 
+                const dropType = rock.userData.type === 'gold_rock' ? 'gold' : 'rock';
+
                 for (let i = 0; i < MINE_DROP_COUNT; i++) {
                     const drop = new THREE.Mesh(
                         new THREE.DodecahedronGeometry(0.15),
                         world.getMat(dropColor)
                     );
-                    drop.userData = { type: 'rock', color: dropColor, autoPickup: true };
+                    drop.userData = { type: dropType, color: dropColor, autoPickup: true };
 
                     // Place drops on planet surface near the mined rock
                     const rockPlanet = rock.userData.planet;
