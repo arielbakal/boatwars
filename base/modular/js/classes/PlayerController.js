@@ -6,7 +6,7 @@ import {
     CAMERA_MIN_Y, CAMERA_MAX_Y, CAMERA_DISTANCE, CAMERA_LERP,
     GRAVITY, JUMP_FORCE, PLAYER_RADIUS, PLAYER_SURFACE_HEIGHT,
     GRAVITY_REFERENCE_RADIUS, MAX_FALL_SPEED, ON_GROUND_THRESHOLD,
-    FRICTION_GROUND, FRICTION_STUN
+    FRICTION_GROUND, FRICTION_STUN, ATTACK_SWING_DURATION
 } from '../constants.js';
 import SphericalUtils from './SphericalUtils.js';
 
@@ -349,7 +349,7 @@ export default class PlayerController {
 
         // --- Procedural animation ---
         if (state.isAttacking) {
-            const swingT = (state._attackVisualTimer || 0) / 0.4;
+            const swingT = (state._attackVisualTimer || 0) / ATTACK_SWING_DURATION;
             let armAngleR, armAngleL;
             // C5: ease-in/out on each phase for impact feel
             if (swingT < 0.4) {
