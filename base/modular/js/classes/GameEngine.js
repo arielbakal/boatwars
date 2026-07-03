@@ -87,6 +87,7 @@ export default class GameEngine {
         this.ui.flash = document.getElementById('white-flash');
         this.ui.resourceHud = document.getElementById('resource-hud');
         this.ui.logCount = document.getElementById('log-count');
+        this.ui.craftHint = document.getElementById('craft-hint');
         this.ui.volSlider = document.getElementById('vol-slider');
         this.ui.volIcon = document.getElementById('vol-icon');
         this.ui.settingsBtn = document.getElementById('settings-btn');

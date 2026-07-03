@@ -175,6 +175,9 @@ export const CREATURE_ESSENCE_MAP = {
 };
 export const ATTACK_SWING_DURATION = 0.4;
 
+// Discoverable crafting hint
+export const CRAFT_HINT_DURATION = 6.0; // seconds the first-wood-pickup hint stays visible
+
 // Space environment
 export const STAR_COUNT = 2000;
 export const STAR_SPREAD = 800;

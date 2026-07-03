@@ -65,6 +65,10 @@ export default class GameState {
         this.mineProgress = 0;            // hits on current rock
         this.mineTimer = 0;
 
+        // Discoverable crafting hint (shown once per session on first wood pickup)
+        this.hasShownCraftHint = false;
+        this.craftHintTimer = 0;
+
         this.lastInteractTime = 0;
 
         // Mouse

@@ -5,7 +5,8 @@
 import {
     INVENTORY_SLOTS,
     NON_STACKABLE_TYPES,
-    PICKUP_RANGE
+    PICKUP_RANGE,
+    CRAFT_HINT_DURATION
 } from '../constants.js';
 
 export default class InventoryManager {
@@ -105,6 +106,39 @@ export default class InventoryManager {
                         state.entities.splice(i, 1);
                     }
                 }
+            }
+        }
+
+        this._updateWoodHUD(state);
+        this._updateCraftHint(dt, state);
+    }
+
+    /** Wires the resource HUD (#log-count) to the live wood count in inventory. */
+    _updateWoodHUD(state) {
+        const woodItem = state.inventory.find(it => it && it.type === 'wood');
+        if (this.ui.logCount) this.ui.logCount.textContent = woodItem ? (woodItem.count || 1) : 0;
+    }
+
+    /**
+     * Shows a one-time, dt-driven hint explaining spaceship assembly the first
+     * time the player picks up wood. Auto-hides after CRAFT_HINT_DURATION seconds.
+     */
+    _updateCraftHint(dt, state) {
+        const hintEl = this.ui.craftHint;
+        if (!state.hasShownCraftHint) {
+            const hasWood = state.inventory.some(it => it && it.type === 'wood');
+            if (hasWood) {
+                state.hasShownCraftHint = true;
+                state.craftHintTimer = CRAFT_HINT_DURATION;
+            }
+        }
+        if (state.craftHintTimer > 0) {
+            state.craftHintTimer -= dt;
+            if (state.craftHintTimer <= 0) {
+                state.craftHintTimer = 0;
+                if (hintEl) hintEl.style.display = 'none';
+            } else if (hintEl) {
+                hintEl.style.display = 'block';
             }
         }
     }
