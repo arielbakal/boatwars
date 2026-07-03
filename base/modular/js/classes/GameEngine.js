@@ -809,7 +809,7 @@ export default class GameEngine {
             }
             case 'rock_mined': {
                 const idx = this.state.entities.findIndex(e =>
-                    (e.userData.type === 'rock' || e.userData.type === 'goldrock') &&
+                    (e.userData.type === 'rock' || e.userData.type === 'gold_rock') &&
                     Math.abs(e.position.x - event.x) < 2 &&
                     Math.abs(e.position.z - event.z) < 2
                 );
