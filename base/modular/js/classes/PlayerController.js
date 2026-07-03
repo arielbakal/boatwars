@@ -60,10 +60,12 @@ export default class PlayerController {
         const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.3), matBody);
         torso.position.y = 0.7;
         this.modelPivot.add(torso);
+        this.torso = torso;
 
         const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.35, 0.4), matLimb);
         head.position.y = 1.2;
         this.modelPivot.add(head);
+        this.head = head;
 
         const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.05), matEye);
         eyeL.position.set(0.12, 1.2, 0.2);
@@ -76,6 +78,8 @@ export default class PlayerController {
         eyeL.add(pupilL);
         eyeR.add(pupilR);
         this.modelPivot.add(eyeL, eyeR);
+        this.eyeL = eyeL;
+        this.eyeR = eyeR;
 
         const legGeo = new THREE.BoxGeometry(0.15, 0.4, 0.15);
         legGeo.translate(0, -0.2, 0);
@@ -103,6 +107,25 @@ export default class PlayerController {
 
         this.heldItem = null;
         this.world.add(this.playerGroup);
+    }
+
+    /**
+     * Toggle visibility of the local player's body (torso, head, eyes, legs, left arm)
+     * WITHOUT touching the right arm — armR (and whatever it's holding, via
+     * handAnchorR) stays visible so a held tool reads Minecraft-style in first person
+     * and its swing animation (armR.rotation.x, driven elsewhere) stays legible.
+     * modelPivot itself is intentionally left alone here: it's still used as a single
+     * on/off switch for the invincibility flash, which should blink the whole local
+     * player (arm included) in either camera mode.
+     */
+    setBodyVisible(visible) {
+        if (this.torso) this.torso.visible = visible;
+        if (this.head) this.head.visible = visible;
+        if (this.eyeL) this.eyeL.visible = visible;
+        if (this.eyeR) this.eyeR.visible = visible;
+        if (this.legL) this.legL.visible = visible;
+        if (this.legR) this.legR.visible = visible;
+        if (this.armL) this.armL.visible = visible;
     }
 
     holdItem(item) {
@@ -218,15 +241,21 @@ export default class PlayerController {
                 const velNormalComp = up.clone().multiplyScalar(player.vel.dot(up));
                 player.vel.copy(moveDir.multiplyScalar(effectiveSpeed).add(velNormalComp));
 
-                // Compute target rotation relative to surface frame
-                const localX = moveDir.dot(this._surfaceRight);
-                const localZ = moveDir.dot(this._surfaceForward);
-                const targetAngle = Math.atan2(localX, localZ);
+                // Compute target rotation relative to surface frame.
+                // Skipped in first person: updateCamera() drives targetRotation from
+                // camera yaw there every frame (so the arm/melee arc track the
+                // crosshair), and blending toward the movement direction here would
+                // just fight that each frame, showing up as arm wobble while strafing.
+                if (player.cameraMode !== 'first') {
+                    const localX = moveDir.dot(this._surfaceRight);
+                    const localZ = moveDir.dot(this._surfaceForward);
+                    const targetAngle = Math.atan2(localX, localZ);
 
-                let angleDiff = targetAngle - player.targetRotation;
-                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                player.targetRotation += angleDiff * 0.2;
+                    let angleDiff = targetAngle - player.targetRotation;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                    player.targetRotation += angleDiff * 0.2;
+                }
             } else {
                 // Apply friction to tangential velocity
                 const velNormal = up.clone().multiplyScalar(player.vel.dot(up));
@@ -366,7 +395,10 @@ export default class PlayerController {
         // --- Invincibility flash ---
         if (state.invincibleTimer > 0 && this.modelPivot) {
             this.modelPivot.visible = Math.sin(state.invincibleTimer * 16) > 0;
-        } else if (this.modelPivot && !this.modelPivot.visible && player.cameraMode !== 'first') {
+        } else if (this.modelPivot && !this.modelPivot.visible) {
+            // Per-part visibility (torso/head/etc. vs the always-visible right arm) is
+            // handled by setBodyVisible() in updateCamera() each frame — modelPivot
+            // itself just needs to come back on after a flash, in either camera mode.
             this.modelPivot.visible = true;
         }
 
@@ -444,7 +476,9 @@ export default class PlayerController {
         }
 
         if (player.cameraMode === 'first') {
-            if (this.modelPivot) this.modelPivot.visible = false;
+            // Hide the body but keep the right arm (and whatever it's holding) so the
+            // held tool still reads in view, Minecraft-style, and its swing stays visible.
+            this.setBodyVisible(false);
 
             // First person: camera at player pos + up * eye height
             const eyePos = player.pos.clone().add(up.clone().multiplyScalar(1.0));
@@ -458,9 +492,17 @@ export default class PlayerController {
 
             camera.lookAt(eyePos.clone().add(lookFwd));
             camera.up.copy(up);
-            player.targetRotation = ca.x;
+
+            // Sync the model's facing to the camera's yaw so the visible arm and the
+            // melee arc (getForward()/_playerForward) point where the crosshair looks.
+            // getForward() resolves a targetRotation of theta to
+            // surfaceForward*cos(theta) + surfaceRight*sin(theta) — the exact NEGATION
+            // of lookFwd's horizontal component at the same angle (see above). Naively
+            // setting targetRotation = ca.x would therefore face the body (and the
+            // held tool) directly away from the camera; adding PI flips it to match.
+            player.targetRotation = ca.x + Math.PI;
         } else {
-            if (this.modelPivot) this.modelPivot.visible = true;
+            this.setBodyVisible(true);
 
             // Third person camera orbiting in the surface frame
             const dist = CAMERA_DISTANCE;
