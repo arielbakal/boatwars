@@ -278,7 +278,11 @@ export default class EntityAISystem {
             // Inherit the parent's planet-tier stats (mirrors GameEngine._applyTier) —
             // without this, hatchlings reset to createCreature's default hp/damage/aggro
             // regardless of which planet they hatch on.
-            if (e.userData.parentTierHpMult !== undefined) baby.userData.hp *= e.userData.parentTierHpMult;
+            if (e.userData.parentTierHpMult !== undefined) {
+                baby.userData.hp *= e.userData.parentTierHpMult;
+                // Re-stamp the multiplier so the baby's own future eggs inherit it too.
+                baby.userData.tierHpMult = e.userData.parentTierHpMult;
+            }
             if (e.userData.parentContactDamage !== undefined) baby.userData.contactDamage = e.userData.parentContactDamage;
             if (e.userData.parentAggroMult !== undefined) baby.userData.aggroMult = e.userData.parentAggroMult;
             if (e.userData.planet) {
