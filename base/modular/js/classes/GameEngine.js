@@ -224,6 +224,12 @@ export default class GameEngine {
         this.logs = [];
         this.state.isOnBoat = false;
         this.state.activeBoat = null;
+        // A reset (including one triggered by a multiplayer 'welcome' regen) can
+        // land mid-boarding-walk; boardingTargetBoat would otherwise keep pointing
+        // at a boat object that's about to be wiped, and updateBoardingAnimation
+        // would keep lerping the player toward it forever with no way to reach it.
+        this.state.isBoardingBoat = false;
+        this.state.boardingTargetBoat = null;
         this.playerController.remove();
         this.audio.fadeOut();
         setTimeout(() => this.initGame(null), 800);
@@ -797,6 +803,23 @@ export default class GameEngine {
     // =====================================================
 
     _setupNetworkCallbacks() {
+        this.network.onWelcome = (data) => {
+            // welcome carries { id, seed } — NetworkManager assigns both to
+            // this.network.playerId/worldSeed BEFORE invoking this callback, so
+            // both are already valid to read here.
+            const status = document.getElementById('mp-status');
+            if (status) status.textContent = `Player #${data.id}`;
+            this._showMultiplayerToast('Joined shared world');
+            // Regenerate using the EXACT same path the "Reset World" button already
+            // uses while connected: resetWorld() tears down the current world, then
+            // initGame() (after its 800ms fx delay) reads this.network.worldSeed and
+            // overrides Math.random via SeededRandom for the whole rebuild, producing
+            // a bit-identical world across every client that shares this seed. Do not
+            // build a second/parallel regen path — resetWorld() also clears
+            // isOnBoat/isBoardingBoat/isDead-adjacent state, so a welcome that lands
+            // mid-boarding-walk or mid-death-screen still ends in a consistent state.
+            this.resetWorld();
+        };
         this.network.onPlayerJoin = (id, data) => {
             this.remotePlayers.addPlayer(id, data);
             this._showMultiplayerToast(`Player ${id} joined`);
@@ -820,11 +843,13 @@ export default class GameEngine {
         if (this.network.connected) return;
         try {
             await this.network.connect(url);
-            this._showMultiplayerToast(`Connected as Player ${this.network.playerId}`);
+            // network.connect() resolves on the WebSocket's onopen, which fires
+            // BEFORE the server's 'welcome' message (id + seed) arrives over
+            // onmessage — reading this.network.playerId here was always null.
+            // The player-id status label and the world regen both happen in
+            // onWelcome (_setupNetworkCallbacks) once the real id/seed land.
             const btn = document.getElementById('mp-connect-btn');
             if (btn) { btn.textContent = 'DISCONNECT'; btn.classList.add('connected'); }
-            const status = document.getElementById('mp-status');
-            if (status) status.textContent = `Player #${this.network.playerId}`;
         } catch (err) {
             console.error('[Multiplayer] Connection failed:', err);
             this._showMultiplayerToast('Connection failed!');
