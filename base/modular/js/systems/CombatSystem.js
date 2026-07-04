@@ -4,13 +4,13 @@
 // =====================================================
 
 import {
-    PLAYER_BASE_ATTACK, PLAYER_SPEED, PLAYER_MAX_HP,
+    PLAYER_BASE_ATTACK, PLAYER_MAX_HP,
     ATTACK_COOLDOWN, ATTACK_RANGE, ATTACK_ARC,
     CREATURE_CONTACT_DAMAGE, CREATURE_CONTACT_COOLDOWN, CREATURE_AGGRO_DURATION,
     RESPAWN_INVINCIBILITY, PLAYER_RADIUS,
     STAT_BOOST_PICKUP_RANGE, STAT_BOOST_BOB_SPEED, STAT_BOOST_BOB_HEIGHT, STAT_BOOST_SPIN_SPEED,
     CREATURE_ESSENCE_MAP, ATTACK_SWING_DURATION,
-    ESSENCE_ATTACK_CAP_MULT, ESSENCE_SPEED_BOOST_CAP_MULT, ESSENCE_MAX_HP_CAP_MULT
+    ESSENCE_ATTACK_CAP_MULT, ESSENCE_MAX_HP_CAP_MULT, PLAYER_SPEED_BOOST_CAP
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
 import { smoothFactor } from '../classes/Easing.js';
@@ -401,8 +401,10 @@ export default class CombatSystem {
                     const cap = PLAYER_BASE_ATTACK * ESSENCE_ATTACK_CAP_MULT;
                     state.player.attack = Math.min(state.player.attack + amount, cap);
                 } else if (stat === 'speed') {
-                    const cap = PLAYER_SPEED * ESSENCE_SPEED_BOOST_CAP_MULT;
-                    state.player.speedBoost = Math.min(state.player.speedBoost + amount, cap);
+                    // PLAYER_SPEED_BOOST_CAP centralizes the old PLAYER_SPEED *
+                    // ESSENCE_SPEED_BOOST_CAP_MULT formula so the FOV kick
+                    // (PlayerController) reads the exact same cap.
+                    state.player.speedBoost = Math.min(state.player.speedBoost + amount, PLAYER_SPEED_BOOST_CAP);
                 } else if (stat === 'health') {
                     const cap = PLAYER_MAX_HP * ESSENCE_MAX_HP_CAP_MULT;
                     state.player.maxHp = Math.min(state.player.maxHp + amount, cap);

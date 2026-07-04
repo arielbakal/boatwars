@@ -25,7 +25,7 @@ import NetworkManager from '../network/NetworkManager.js';
 import RemotePlayerManager from '../network/RemotePlayerManager.js';
 import SeededRandom from '../network/SeededRandom.js';
 
-import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE } from '../constants.js';
+import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV } from '../constants.js';
 
 export default class GameEngine {
     constructor() {
@@ -647,7 +647,7 @@ export default class GameEngine {
         // Camera initial position
         const camPos = spawnPos.clone().add(new THREE.Vector3(0, 3, 6));
         this.world.camera.position.copy(camPos);
-        this.world.camera.fov = 60;
+        this.world.camera.fov = CAMERA_FOV; // reset any residual FOV kick from a previous world
         this.world.camera.updateProjectionMatrix();
 
         if (!this.state.musicStarted) {

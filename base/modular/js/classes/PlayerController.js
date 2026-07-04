@@ -3,10 +3,11 @@
 // =====================================================
 
 import {
-    CAMERA_MIN_Y, CAMERA_MAX_Y, CAMERA_DISTANCE, CAMERA_LERP,
+    CAMERA_MIN_Y, CAMERA_MAX_Y, CAMERA_DISTANCE, CAMERA_LERP, CAMERA_FOV,
     GRAVITY, JUMP_FORCE, PLAYER_RADIUS, PLAYER_SURFACE_HEIGHT,
     GRAVITY_REFERENCE_RADIUS, MAX_FALL_SPEED, ON_GROUND_THRESHOLD,
-    FRICTION_GROUND, FRICTION_STUN, ATTACK_SWING_DURATION
+    FRICTION_GROUND, FRICTION_STUN, ATTACK_SWING_DURATION,
+    PLAYER_FOV_KICK, FOV_KICK_LERP, PLAYER_SPEED_BOOST_CAP
 } from '../constants.js';
 import SphericalUtils from './SphericalUtils.js';
 import { easeInOutQuad, smoothFactor } from './Easing.js';
@@ -32,6 +33,7 @@ export default class PlayerController {
         this.armL = null;
         this.armR = null;
         this.time = 0;
+        this._isMoving = false; // last-frame movement state, read by updateCamera()'s FOV kick
         this.chopAnimState = null;
         this._lookTarget = null; // C8: smoothed camera look target
 
@@ -399,6 +401,8 @@ export default class PlayerController {
         }
 
         // --- Procedural animation ---
+        this._isMoving = isMoving; // read by updateCamera()'s on-foot FOV kick
+
         if (state.isAttacking) {
             const swingT = (state._attackVisualTimer || 0) / ATTACK_SWING_DURATION;
             let armAngleR, armAngleL;
@@ -465,6 +469,19 @@ export default class PlayerController {
         const player = this.state.player;
         const ca = player.cameraAngle;
         const up = this._surfaceNormal;
+
+        // FOV speed kick: on-foot speed-sell for the speed essence, only while
+        // actually moving. Applied before the mode branch so it works in both
+        // third and first person.
+        const boostRatio = (this._isMoving && player.speedBoost > 0 && PLAYER_SPEED_BOOST_CAP > 0)
+            ? Math.min(1, player.speedBoost / PLAYER_SPEED_BOOST_CAP)
+            : 0;
+        const targetFov = CAMERA_FOV + PLAYER_FOV_KICK * boostRatio;
+        const newFov = THREE.MathUtils.lerp(camera.fov, targetFov, smoothFactor(FOV_KICK_LERP, dt));
+        if (Math.abs(newFov - camera.fov) > 0.01) {
+            camera.fov = newFov;
+            camera.updateProjectionMatrix();
+        }
 
         // Clamp vertical angle
         if (player.cameraMode !== 'first') {

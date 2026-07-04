@@ -191,6 +191,10 @@ export const STAT_BOOST_SPIN_SPEED = 2.0;
 export const ESSENCE_ATTACK_CAP_MULT = 4;      // attack cap = 4x base attack
 export const ESSENCE_SPEED_BOOST_CAP_MULT = 0.6; // speedBoost cap = +60% of base speed
 export const ESSENCE_MAX_HP_CAP_MULT = 3;      // maxHp cap = 3x base maxHp
+// Derived absolute cap for player.speedBoost — the same formula CombatSystem uses
+// to clamp the stat, centralized so other systems (FOV kick) read the exact cap
+// instead of recomputing it and risking drift from the multiplier above.
+export const PLAYER_SPEED_BOOST_CAP = PLAYER_SPEED * ESSENCE_SPEED_BOOST_CAP_MULT;
 
 // Essence drops from creatures
 export const CREATURE_ESSENCE_MAP = {
@@ -207,3 +211,9 @@ export const CRAFT_HINT_DURATION = 6.0; // seconds the first-wood-pickup hint st
 export const STAR_COUNT = 2000;
 export const STAR_SPREAD = 800;
 export const SPACE_FOG_COLOR = 0x020208;
+
+// FOV speed kick (game feel) — camera.fov interpolates toward CAMERA_FOV + kick,
+// scaled by how fast the player currently is relative to their own max.
+export const SHIP_FOV_KICK = 15;    // max extra FOV at full ship throttle
+export const PLAYER_FOV_KICK = 8;   // max extra FOV on foot at the speed-essence cap
+export const FOV_KICK_LERP = 0.08;  // 60fps-tuned smoothing rate; used via smoothFactor(FOV_KICK_LERP, dt)

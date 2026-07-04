@@ -19,7 +19,7 @@ import {
     SHIP_DAMAGE_SPEED_HP_THRESHOLD, SHIP_DAMAGED_MIN_SPEED_MULT,
     SHIP_REPAIR_GOLD_COST, SHIP_REPAIR_HEAL_AMOUNT,
     BOARDING_WALK_SPEED, CAT_BOARDING_DELAY,
-    CAMERA_DISTANCE_BOAT
+    CAMERA_DISTANCE_BOAT, CAMERA_FOV, SHIP_FOV_KICK, FOV_KICK_LERP
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
 import { smoothFactor } from '../classes/Easing.js';
@@ -627,6 +627,20 @@ export default class BoatSystem {
     _updateCamera(state, boat, camera, pc, dt) {
         const q = state.shipQuaternion;
         const ca = state.player.cameraAngle;
+
+        // FOV speed kick — applies to both chase and cockpit views below, scaled by
+        // current throttle against the (possibly damage-degraded) effective max speed.
+        const stats = boat.userData.stats;
+        if (stats) {
+            const effMax = this._getEffectiveMaxSpeed(stats);
+            const speedRatio = effMax > 0 ? Math.min(1, Math.abs(stats.currentSpeed) / effMax) : 0;
+            const targetFov = CAMERA_FOV + SHIP_FOV_KICK * speedRatio;
+            const newFov = THREE.MathUtils.lerp(camera.fov, targetFov, smoothFactor(FOV_KICK_LERP, dt));
+            if (Math.abs(newFov - camera.fov) > 0.01) {
+                camera.fov = newFov;
+                camera.updateProjectionMatrix();
+            }
+        }
 
         if (state.shipCameraMode === 'cockpit') {
             // --- COCKPIT VIEW ---
