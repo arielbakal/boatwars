@@ -7,6 +7,27 @@ import { DEBRIS_MIN_Y } from '../constants.js';
 import { easeOutQuad } from '../classes/Easing.js';
 
 export default class ParticleSystem {
+    /**
+     * Remove + dispose a single damage-number sprite (texture + material, NOT the
+     * shared quad geometry — see the comment in the expiry loop below). Shared by
+     * that loop and GameEngine.resetWorld's full-clear so there's one disposal
+     * code path instead of two copies that can drift apart.
+     */
+    disposeDamageNumber(world, n) {
+        world.remove(n);
+        if (n.material.map) n.material.map.dispose();
+        n.material.dispose();
+    }
+
+    /** Remove + dispose every live damage number — used by resetWorld() so a
+     * reset doesn't leak sprite textures/materials for numbers still mid-flight. */
+    clearDamageNumbers(world, state) {
+        for (const n of state.damageNumbers) {
+            this.disposeDamageNumber(world, n);
+        }
+        state.damageNumbers.length = 0;
+    }
+
     update(dt, context) {
         const { state, world, factory } = context;
 
@@ -82,13 +103,11 @@ export default class ParticleSystem {
             n.position.y = n.userData.startY + eased * 1.2;
             n.material.opacity = 1 - eased;
             if (t >= 1) {
-                world.remove(n);
                 // Dispose the texture + material, but NOT n.geometry — THREE.Sprite
                 // instances share one static quad geometry across the whole scene
                 // (particles, speech bubbles, ...); disposing it here would break
                 // every other sprite currently in the scene, not just this one.
-                if (n.material.map) n.material.map.dispose();
-                n.material.dispose();
+                this.disposeDamageNumber(world, n);
                 state.damageNumbers.splice(i, 1);
             }
         }

@@ -20,7 +20,10 @@ export default class WorldManager {
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.outputEncoding = THREE.sRGBEncoding;
         document.body.appendChild(this.renderer.domElement);
-        this.scene.background = new THREE.Color(0x020208);
+        // Matches SPACE_FOG_COLOR below (the comment on scene.fog already claimed
+        // this) so fogged-out geometry actually blends into the sky as intended,
+        // and the two can't drift apart again.
+        this.scene.background = new THREE.Color(SPACE_FOG_COLOR);
         // Navigation-safe space fog: far (700) comfortably exceeds the farthest
         // planet's edge (~171 units from origin, planet 3) plus travel margin, so
         // it only ever fades far-away emptiness, never a planet you're approaching.

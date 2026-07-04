@@ -428,7 +428,12 @@ export default class EntityFactory {
         // we want for a glow shell (see WorldManager's space fog).
         if (hasAtmosphere) {
             const atmosScale = 1.06 + Math.abs(Math.sin(seed * 0.5)) * 0.04; // 1.06-1.10x radius
-            const atmosGeo = new THREE.IcosahedronGeometry(radius * atmosScale, detail + 1);
+            // The fresnel rim glow below is entirely per-fragment (rim = f(vNormal,
+            // vViewDir), both interpolated) — it doesn't read per-vertex noise or
+            // displacement, so it doesn't need the terrain-grade tessellation the
+            // other layers use. detail 2 = 320 tris vs. the old detail+1 (5) = 20,480
+            // tris — same smooth rim at this render scale, ~1/64th the geometry.
+            const atmosGeo = new THREE.IcosahedronGeometry(radius * atmosScale, 2);
             const atmosColor = palette.background.clone().lerp(palette.accent, 0.35);
             const atmosIntensity = 0.9 + Math.abs(Math.sin(seed * 1.7)) * 0.4; // 0.9-1.3
             const atmosMat = new THREE.ShaderMaterial({

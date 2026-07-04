@@ -234,6 +234,11 @@ export default class GameEngine {
         // would keep lerping the player toward it forever with no way to reach it.
         this.state.isBoardingBoat = false;
         this.state.boardingTargetBoat = null;
+        // Reset hygiene: a shake mid-decay or damage numbers still mid-flight would
+        // otherwise carry over into the new world — the latter would also leak
+        // their sprite textures/materials since nothing else ever disposes them.
+        this.state.cameraShake = 0;
+        this.particleSystem.clearDamageNumbers(this.world, this.state);
         this.playerController.remove();
         this.audio.fadeOut();
         setTimeout(() => this.initGame(null), 800);
