@@ -272,6 +272,14 @@ export default class GameEngine {
 
         this.state.phase = 'playing';
         this.state.palette = this.factory.generatePalette(sphereColor);
+        // C1: state.worldDNA stays a session-wide roll for non-planet consumers only
+        // (currently: AudioManager.startMusic's procedural seed). Each planet below
+        // rolls its OWN fresh DNA (planetDNA1..5) right after its islands.push() so
+        // tree/bush/rock/grass/creature-fallback shapes differ per planet instead of
+        // sharing this one. Placed items and egg-hatch babies are unaffected — they
+        // always carry an explicit style/parentDNA object captured at pickup/lay
+        // time (InputHandler.createEntityFromItem, EntityAISystem's hatch logic),
+        // never falling back to worldDNA.
         this.state.worldDNA = this.factory.generateWorldDNA();
         // Space background stays dark
         this.ui.invContainer.style.display = 'flex';
@@ -296,10 +304,13 @@ export default class GameEngine {
             name: "STARTING PLANET"
         });
 
+        // C1: fresh world DNA for planet 1's flora/fauna shapes
+        const planetDNA1 = this.factory.generateWorldDNA();
+
         // Trees on planet 1
         for (let i = 0; i < 14; i++) {
             const pos = rndSurface(planet1, 2.0, 12.0);
-            const tree = this.factory.createTree(this.state.palette, 0, 0);
+            const tree = this.factory.createTree(this.state.palette, 0, 0, this._treeStyleFromDNA(planetDNA1, this.state.palette));
             this.placeOnPlanet(tree, planet1, pos);
             this.state.entities.push(tree);
             this.world.add(tree);
@@ -307,21 +318,21 @@ export default class GameEngine {
         // Bushes
         for (let i = 0; i < 7; i++) {
             const pos = rndSurface(planet1, 1.5, 12.0);
-            const e = this.factory.createBush(this.state.palette, 0, 0);
+            const e = this.factory.createBush(this.state.palette, 0, 0, this._bushStyleFromDNA(planetDNA1, this.state.palette));
             this.placeOnPlanet(e, planet1, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         // Rocks
         for (let i = 0; i < 5; i++) {
             const pos = rndSurface(planet1, 1.5, 12.0);
-            const e = this.factory.createRock(this.state.palette, 0, 0);
+            const e = this.factory.createRock(this.state.palette, 0, 0, this._rockStyleFromDNA(planetDNA1, this.state.palette));
             this.placeOnPlanet(e, planet1, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         // Grass
         for (let i = 0; i < 30; i++) {
             const pos = rndSurface(planet1, 0.5, 13.0);
-            const e = this.factory.createGrass(this.state.palette, 0, 0);
+            const e = this.factory.createGrass(this.state.palette, 0, 0, this._grassStyleFromDNA(planetDNA1, this.state.palette));
             this.placeOnPlanet(e, planet1, pos);
             this.state.entities.push(e); this.world.add(e);
         }
@@ -369,27 +380,30 @@ export default class GameEngine {
             floorY: 0,
             name: "FLORA WORLD"
         });
+        // C1: fresh world DNA for planet 2's flora/fauna shapes
+        const planetDNA2 = this.factory.generateWorldDNA();
+
         for (let i = 0; i < 18; i++) {
             const pos = rndSurface(planet2, 2.0, 14.0);
-            const e = this.factory.createTree(palette2, 0, 0);
+            const e = this.factory.createTree(palette2, 0, 0, this._treeStyleFromDNA(planetDNA2, palette2));
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         for (let i = 0; i < 12; i++) {
             const pos = rndSurface(planet2, 1.5, 14.0);
-            const e = this.factory.createBush(palette2, 0, 0);
+            const e = this.factory.createBush(palette2, 0, 0, this._bushStyleFromDNA(planetDNA2, palette2));
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         for (let i = 0; i < 4; i++) {
             const pos = rndSurface(planet2, 1.5, 14.0);
-            const e = this.factory.createRock(palette2, 0, 0);
+            const e = this.factory.createRock(palette2, 0, 0, this._rockStyleFromDNA(planetDNA2, palette2));
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         for (let i = 0; i < 20; i++) {
             const pos = rndSurface(planet2, 0.5, 15.0);
-            const e = this.factory.createGrass(palette2, 0, 0);
+            const e = this.factory.createGrass(palette2, 0, 0, this._grassStyleFromDNA(planetDNA2, palette2));
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
@@ -430,6 +444,8 @@ export default class GameEngine {
             floorY: 0,
             name: "ANCIENT PEAKS"
         });
+        // C1: fresh world DNA for planet 3's flora/fauna shapes
+        const planetDNA3 = this.factory.generateWorldDNA();
         // Mountain on planet 3
         const mountainPos = planet3.center.clone().add(new THREE.Vector3(0, planet3.radius, 0));
         const mountain = this.factory.createMountain(palette3, 0, 0, 1.5);
@@ -447,7 +463,7 @@ export default class GameEngine {
         // Big rocks on planet 3 edges
         for (let i = 0; i < 8; i++) {
             const pos = rndSurface(planet3, 18.0, 26.0);
-            const rock = this.factory.createRock(palette3, 0, 0);
+            const rock = this.factory.createRock(palette3, 0, 0, this._rockStyleFromDNA(planetDNA3, palette3));
             this.placeOnPlanet(rock, planet3, pos);
             rock.scale.set(3, 3, 3);
             this.state.entities.push(rock); this.world.add(rock);
@@ -464,13 +480,13 @@ export default class GameEngine {
         // Vegetation on planet 3
         for (let i = 0; i < 10; i++) {
             const pos = rndSurface(planet3, 17.0, 26.0);
-            const e = this.factory.createTree(palette3, 0, 0);
+            const e = this.factory.createTree(palette3, 0, 0, this._treeStyleFromDNA(planetDNA3, palette3));
             this.placeOnPlanet(e, planet3, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         for (let i = 0; i < 40; i++) {
             const pos = rndSurface(planet3, 17.0, 27.0);
-            const e = this.factory.createGrass(palette3, 0, 0);
+            const e = this.factory.createGrass(palette3, 0, 0, this._grassStyleFromDNA(planetDNA3, palette3));
             this.placeOnPlanet(e, planet3, pos);
             this.state.entities.push(e); this.world.add(e);
         }
@@ -494,7 +510,7 @@ export default class GameEngine {
         }
         for (let i = 0; i < 2; i++) {
             const pos = rndSurface(planet3, 17.0, 24.0);
-            const c = this.factory.createCreature(palette3, 0, 0);
+            const c = this.factory.createCreature(palette3, 0, 0, this._creatureStyleFromDNA(planetDNA3, palette3));
             this.placeOnPlanet(c, planet3, pos);
             c.userData.boundCenter = planet3.center.clone();
             c.userData.boundRadius = planet3.radius * 0.85;
@@ -516,27 +532,30 @@ export default class GameEngine {
             floorY: 0,
             name: "ROCKY OUTPOST"
         });
+        // C1: fresh world DNA for planet 4's flora/fauna shapes
+        const planetDNA4 = this.factory.generateWorldDNA();
+
         for (let i = 0; i < 4; i++) {
             const pos = rndSurface(planet4, 2.0, 10.0);
-            const e = this.factory.createTree(palette4, 0, 0);
+            const e = this.factory.createTree(palette4, 0, 0, this._treeStyleFromDNA(planetDNA4, palette4));
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         for (let i = 0; i < 3; i++) {
             const pos = rndSurface(planet4, 1.5, 10.0);
-            const e = this.factory.createBush(palette4, 0, 0);
+            const e = this.factory.createBush(palette4, 0, 0, this._bushStyleFromDNA(planetDNA4, palette4));
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         for (let i = 0; i < 3; i++) {
             const pos = rndSurface(planet4, 1.5, 10.0);
-            const e = this.factory.createRock(palette4, 0, 0);
+            const e = this.factory.createRock(palette4, 0, 0, this._rockStyleFromDNA(planetDNA4, palette4));
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         for (let i = 0; i < 12; i++) {
             const pos = rndSurface(planet4, 0.5, 11.0);
-            const e = this.factory.createGrass(palette4, 0, 0);
+            const e = this.factory.createGrass(palette4, 0, 0, this._grassStyleFromDNA(planetDNA4, palette4));
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
@@ -571,27 +590,30 @@ export default class GameEngine {
             floorY: 0,
             name: "DISTANT WORLD"
         });
+        // C1: fresh world DNA for planet 5's flora/fauna shapes
+        const planetDNA5 = this.factory.generateWorldDNA();
+
         for (let i = 0; i < 5; i++) {
             const pos = rndSurface(planet5, 2.0, 12.0);
-            const e = this.factory.createTree(palette5, 0, 0);
+            const e = this.factory.createTree(palette5, 0, 0, this._treeStyleFromDNA(planetDNA5, palette5));
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         for (let i = 0; i < 4; i++) {
             const pos = rndSurface(planet5, 1.5, 12.0);
-            const e = this.factory.createBush(palette5, 0, 0);
+            const e = this.factory.createBush(palette5, 0, 0, this._bushStyleFromDNA(planetDNA5, palette5));
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         for (let i = 0; i < 4; i++) {
             const pos = rndSurface(planet5, 1.5, 12.0);
-            const e = this.factory.createRock(palette5, 0, 0);
+            const e = this.factory.createRock(palette5, 0, 0, this._rockStyleFromDNA(planetDNA5, palette5));
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         for (let i = 0; i < 18; i++) {
             const pos = rndSurface(planet5, 0.5, 13.0);
-            const e = this.factory.createGrass(palette5, 0, 0);
+            const e = this.factory.createGrass(palette5, 0, 0, this._grassStyleFromDNA(planetDNA5, palette5));
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
@@ -695,6 +717,40 @@ export default class GameEngine {
         // re-derive their own tier-scaled hp from their own base hp at hatch time —
         // using the parent's current (possibly damaged) hp would pass the damage along.
         creature.userData.tierHpMult = mod.hp;
+    }
+
+    // =====================================================
+    // C1: PER-PLANET WORLD DNA STYLE HELPERS
+    // =====================================================
+    // Each planet in initGame rolls its own worldDNA (planetDNA1..5) so tree/
+    // bush/rock/grass shape differs per planet instead of sharing one session-
+    // wide DNA. These build the exact "style" object shape each createX()
+    // expects when style is passed explicitly — mirrors the fallback branches
+    // in EntityFactory that read state.worldDNA when style is null, just fed
+    // from a per-planet DNA object instead. Color is freshly cloned per call
+    // so every instance owns its own THREE.Color (matches prior fallback
+    // behavior, avoids aliasing across entities).
+    _treeStyleFromDNA(dna, p) {
+        return {
+            color: p.flora.clone(), trunkColor: p.trunk.clone(), shape: dna.tree.shape,
+            height: 1.5 * dna.tree.heightMod + Math.random() * 0.5, thickness: 0.2 * dna.tree.thickMod
+        };
+    }
+    _bushStyleFromDNA(dna, p) {
+        return { color: p.flora.clone(), shape: dna.bush.shape, scaleY: dna.bush.scaleY };
+    }
+    _rockStyleFromDNA(dna, p) {
+        return { color: p.baseRock.clone(), shape: dna.rock.shape };
+    }
+    _grassStyleFromDNA(dna, p) {
+        return { color: p.tallGrass.clone(), height: dna.grass.height };
+    }
+    _creatureStyleFromDNA(dna, p) {
+        return {
+            color: p.creature.clone(), bodyShape: dna.creature.shape, speciesType: dna.creature.speciesType,
+            eyeCount: dna.creature.eyes, scale: dna.creature.scale, eyeScale: dna.creature.eyeScale,
+            moveSpeed: dna.creature.moveSpeed, temperament: dna.creature.temperament
+        };
     }
 
     repairShip() {
