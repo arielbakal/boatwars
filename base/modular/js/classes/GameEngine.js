@@ -25,7 +25,7 @@ import NetworkManager from '../network/NetworkManager.js';
 import RemotePlayerManager from '../network/RemotePlayerManager.js';
 import SeededRandom from '../network/SeededRandom.js';
 
-import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV, RENDER_SCALE, STACKS_BY_TYPE } from '../constants.js';
+import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV, RENDER_SCALE, STACKS_BY_TYPE, SHIP_LOG_CLUSTER_RADIUS } from '../constants.js';
 
 export default class GameEngine {
     constructor() {
@@ -1036,6 +1036,52 @@ export default class GameEngine {
                     const sourcePos = event.x !== undefined ? { x: event.x, y: 0, z: event.z } : null;
                     this.combatSystem._damagePlayer(event.damage || 2, ctx, sourcePos);
                 }
+                break;
+            }
+            case 'log_placed': {
+                // Visual sync only: NOT pushed into this.logs, which drives THIS
+                // client's own checkForBoat() clustering — counting a remote
+                // player's logs toward a local build could let two clients each
+                // independently detect the same cluster and broadcast their own
+                // ship_built for it.
+                const pos = new THREE.Vector3(event.x, event.y || 0, event.z);
+                const color = new THREE.Color(event.colorHex !== undefined ? event.colorHex : 0x8B4513);
+                const log = this.factory.createLog(color, 0, 0);
+                log.position.copy(pos);
+                const result = SphericalUtils.findNearestPlanet(pos, this.state.islands);
+                if (result && result.planet) {
+                    const normal = SphericalUtils.getSurfaceNormal(pos, result.planet);
+                    log.quaternion.copy(SphericalUtils.getOrientationOnSurface(normal));
+                    log.userData.planet = result.planet;
+                }
+                this.world.add(log);
+                this.state.entities.push(log);
+                break;
+            }
+            case 'ship_built': {
+                const pos = new THREE.Vector3(event.x, event.y || 0, event.z);
+                // Drop any of THIS client's own log entities (including ones synced
+                // via 'log_placed' above) that the other player's build just consumed
+                // — mirrors the tree_chopped/rock_mined position-scan pattern.
+                for (let i = this.state.entities.length - 1; i >= 0; i--) {
+                    const e = this.state.entities[i];
+                    if (e.userData.type === 'log' && e.position.distanceTo(pos) < SHIP_LOG_CLUSTER_RADIUS) {
+                        this.world.scene.remove(e);
+                        this.state.entities.splice(i, 1);
+                        const li = this.logs.indexOf(e);
+                        if (li > -1) this.logs.splice(li, 1);
+                    }
+                }
+                const color = new THREE.Color(event.colorHex !== undefined ? event.colorHex : 0xffffff);
+                const boat = this.factory.createSpaceship(pos.x, pos.y, pos.z, color);
+                if (event.qx !== undefined) {
+                    boat.quaternion.set(event.qx, event.qy, event.qz, event.qw);
+                }
+                this.world.add(boat);
+                // Registered exactly like a locally-built ship (state.entities) so
+                // other players — including this client — can walk up and board it.
+                this.state.entities.push(boat);
+                this.audio.boatBuild();
                 break;
             }
         }

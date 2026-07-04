@@ -567,6 +567,13 @@ export default class InputHandler {
 
             // Check for spaceship building after placing logs
             if (it.type === 'wood' || it.type === 'log') {
+                // Log placement itself was never broadcast (only tree/rock REMOVAL and,
+                // as of this unit, ship_built are) — mirror the tree_chopped/rock_mined
+                // world_event pattern so other clients can actually see this log too.
+                this.engine.broadcastWorldEvent('log_placed', ent.position.x, ent.position.z, {
+                    y: ent.position.y,
+                    colorHex: (ent.userData.color || it.color || new THREE.Color(0x8B4513)).getHex()
+                });
                 this.checkForBoat();
                 this.updateBuildProgress();
             }
@@ -632,6 +639,17 @@ export default class InputHandler {
                 world.add(boat);
                 state.entities.push(boat);
                 sfx.boatBuild();
+
+                // Sync the build to other clients: they spawn the identical ship
+                // (same color + orientation) and drop any of their own copies of the
+                // logs it consumed. world_event already excludes the sender server-side
+                // (server/index.js's broadcast(ws, ...) for 'world_event'), so there's
+                // no self-echo to guard against here.
+                this.engine.broadcastWorldEvent('ship_built', spawnPos.x, spawnPos.z, {
+                    y: spawnPos.y,
+                    colorHex: boatColor.getHex(),
+                    qx: boat.quaternion.x, qy: boat.quaternion.y, qz: boat.quaternion.z, qw: boat.quaternion.w
+                });
                 for (let k = 0; k < 30; k++) {
                     factory.createParticle(spawnPos.clone(), boatColor, 2.0);
                 }
