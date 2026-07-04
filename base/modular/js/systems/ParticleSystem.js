@@ -4,6 +4,7 @@
 
 import SphericalUtils from '../classes/SphericalUtils.js';
 import { DEBRIS_MIN_Y } from '../constants.js';
+import { easeOutQuad } from '../classes/Easing.js';
 
 export default class ParticleSystem {
     update(dt, context) {
@@ -68,6 +69,27 @@ export default class ParticleSystem {
                     factory.disposeHierarchy(d);
                     state.debris.splice(i, 1);
                 }
+            }
+        }
+
+        // Floating combat damage numbers (spawned via EntityFactory.createDamageNumber):
+        // rise + fade over their duration with easeOutQuad, then get removed and disposed.
+        for (let i = state.damageNumbers.length - 1; i >= 0; i--) {
+            const n = state.damageNumbers[i];
+            n.userData.life += dt;
+            const t = Math.min(1, n.userData.life / n.userData.duration);
+            const eased = easeOutQuad(t);
+            n.position.y = n.userData.startY + eased * 1.2;
+            n.material.opacity = 1 - eased;
+            if (t >= 1) {
+                world.remove(n);
+                // Dispose the texture + material, but NOT n.geometry — THREE.Sprite
+                // instances share one static quad geometry across the whole scene
+                // (particles, speech bubbles, ...); disposing it here would break
+                // every other sprite currently in the scene, not just this one.
+                if (n.material.map) n.material.map.dispose();
+                n.material.dispose();
+                state.damageNumbers.splice(i, 1);
             }
         }
     }

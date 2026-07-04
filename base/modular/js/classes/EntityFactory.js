@@ -79,6 +79,37 @@ export default class EntityFactory {
         return sprite;
     }
 
+    /**
+     * Create a floating combat damage-number sprite (CanvasTexture text, same
+     * pattern as createBubbleTexture above) at a world position. Free-standing —
+     * added directly to the world, not parented to the entity that was hit, so it
+     * keeps floating/fading on its own timeline even if that entity dies and is
+     * removed a moment later. Owned and ticked by ParticleSystem (state.damageNumbers):
+     * floats up and fades there, then gets removed and disposed (texture + material).
+     */
+    createDamageNumber(pos, value, colorHex = '#ffffff') {
+        const canvas = document.createElement('canvas');
+        canvas.width = 96; canvas.height = 48;
+        const ctx = canvas.getContext('2d');
+        ctx.font = 'bold 28px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.strokeText(String(value), 48, 24);
+        ctx.fillStyle = colorHex;
+        ctx.fillText(String(value), 48, 24);
+        const tex = new THREE.CanvasTexture(canvas);
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+        sprite.scale.set(0.8, 0.4, 1);
+        sprite.position.copy(pos);
+        sprite.position.x += (Math.random() - 0.5) * 0.3;
+        sprite.position.z += (Math.random() - 0.5) * 0.3;
+        sprite.userData = { life: 0, duration: 0.8, startY: sprite.position.y };
+        this.world.add(sprite);
+        return sprite;
+    }
+
     disposeHierarchy(obj) {
         if (!obj) return;
         obj.traverse(child => {

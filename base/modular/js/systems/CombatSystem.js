@@ -151,6 +151,8 @@ export default class CombatSystem {
 
         entity.userData.hp -= damage;
 
+        this._spawnDamageNumber(entity.position.clone().add(new THREE.Vector3(0, 0.4, 0)), damage, '#ffee66', ctx);
+
         this._flashEntity(entity, 0xff0000, 0.2);
 
         // C7: Lerp-based knockback — store target, interpolate over ~4 frames
@@ -194,6 +196,23 @@ export default class CombatSystem {
             entity.userData._dying = true;
             entity.userData._dyingTimer = 0.15; // seconds to shrink
             entity.userData._dyingBaseScale = entity.scale.x; // capture current scale
+        }
+    }
+
+    /**
+     * Spawn a floating damage-number sprite (EntityFactory.createDamageNumber) and
+     * cap concurrent numbers at 20 by dropping the oldest — this fires on every hit,
+     * so an uncapped list would grow unbounded during a sustained fight.
+     */
+    _spawnDamageNumber(pos, value, colorHex, ctx) {
+        const { state, world, factory } = ctx;
+        const num = factory.createDamageNumber(pos, Math.round(value), colorHex);
+        state.damageNumbers.push(num);
+        if (state.damageNumbers.length > 20) {
+            const oldest = state.damageNumbers.shift();
+            world.remove(oldest);
+            if (oldest.material.map) oldest.material.map.dispose();
+            oldest.material.dispose();
         }
     }
 
@@ -265,6 +284,7 @@ export default class CombatSystem {
         state.player.hp -= amount;
         audio.hurt();
         state.addShake(0.15);
+        this._spawnDamageNumber(sourcePos || state.player.pos, amount, '#ff4444', ctx);
 
         // Knockback along surface
         if (sourcePos) {

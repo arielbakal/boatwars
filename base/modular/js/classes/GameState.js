@@ -106,6 +106,10 @@ export default class GameState {
         // (ParticleSystem owns the decay; see addShake()/consumers in
         // PlayerController.updateCamera and BoatSystem._updateCamera).
         this.cameraShake = 0;
+
+        // Floating combat damage numbers (world-space sprites; ticked/disposed by
+        // ParticleSystem, spawned via EntityFactory.createDamageNumber).
+        this.damageNumbers = [];
     }
 
     /** Add camera shake magnitude, clamped to a sane max so hits can't compound into chaos. */
