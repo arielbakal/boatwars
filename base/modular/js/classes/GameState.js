@@ -110,6 +110,14 @@ export default class GameState {
         // Floating combat damage numbers (world-space sprites; ticked/disposed by
         // ParticleSystem, spawned via EntityFactory.createDamageNumber).
         this.damageNumbers = [];
+
+        // True for the brief window between resetWorld() tearing down the old
+        // player/world and initGame() finishing the rebuild (~800ms, see
+        // GameEngine.resetWorld's setTimeout). GameEngine.animate() checks this to
+        // skip systems that dereference the player model — resetWorld() nulls
+        // playerController.playerGroup but leaves other cached refs (e.g.
+        // modelPivot) stale-truthy, so an unguarded call in that window throws.
+        this.isResettingWorld = false;
     }
 
     /** Add camera shake magnitude, clamped to a sane max so hits can't compound into chaos. */

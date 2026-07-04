@@ -187,6 +187,10 @@ export default class GameEngine {
 
     resetWorld() {
         if (this.state.phase !== 'playing') return;
+        // Guard against a second rapid click stacking two initGame() timeouts —
+        // also doubles as the source of truth animate() checks below.
+        if (this.state.isResettingWorld) return;
+        this.state.isResettingWorld = true;
         this.audio.explode();
         this.ui.flash.style.opacity = 1;
         setTimeout(() => this.ui.flash.style.opacity = 0, 500);
@@ -686,6 +690,9 @@ export default class GameEngine {
         }
 
         if (seededOverride) seededOverride.restore();
+
+        // Rebuild complete — safe again for animate() to touch the player model.
+        this.state.isResettingWorld = false;
     }
 
     boardBoat(boat) {
@@ -959,46 +966,59 @@ export default class GameEngine {
                 broadcastWorldEvent: (action, x, z, extra) => this.broadcastWorldEvent(action, x, z, extra)
             };
 
-            // Boat/spaceship system
-            this.boatSystem.update(dt, ctx);
+            // Skip every system below that touches the player model while
+            // resetWorld() has torn it down and initGame() hasn't rebuilt it yet.
+            // resetWorld() nulls playerController.playerGroup but leaves other
+            // cached refs (e.g. modelPivot) stale-truthy, so a couple of call
+            // sites that check modelPivot but then dereference playerGroup
+            // unconditionally (getForward() below, ChopSystem's swing-facing
+            // slerp) throw during this ~800ms gap. Particles/network/remote
+            // players are left running outside this guard so reset debris/FX
+            // keep animating and multiplayer state keeps flowing.
+            if (!state.isResettingWorld) {
+                // Boat/spaceship system
+                this.boatSystem.update(dt, ctx);
 
-            // Player movement & interaction
-            if (state.isOnBoat) {
-                // Boat system handles everything
-            } else if (!state.isBoardingBoat) {
-                this.playerController.update(dt, state.islands);
-                this.playerController.updateCamera(camera, dt);
-                this.input.updateInteraction();
-                this.chopSystem.update(dt, ctx);
-                this.mineSystem.update(dt, ctx);
-                this.inventorySystem.update(dt, ctx);
+                // Player movement & interaction
+                if (state.isOnBoat) {
+                    // Boat system handles everything
+                } else if (!state.isBoardingBoat) {
+                    this.playerController.update(dt, state.islands);
+                    this.playerController.updateCamera(camera, dt);
+                    this.input.updateInteraction();
+                    this.chopSystem.update(dt, ctx);
+                    this.mineSystem.update(dt, ctx);
+                    this.inventorySystem.update(dt, ctx);
+                }
+
+                // Update player forward direction for combat targeting.
+                // First person: read the camera's exact look direction (full 3D, pitch
+                // included) instead of the animated model's facing — the model's yaw is
+                // smoothed (slerp) toward the camera each frame, which is fine visually
+                // but adds a frame or two of lag that makes quick flick-shots whiff. The
+                // crosshair should always hit what it's actually centered on right now.
+                if (state.player.cameraMode === 'first' && !state.isOnBoat) {
+                    const aimForward = new THREE.Vector3();
+                    camera.getWorldDirection(aimForward);
+                    state._playerForward = aimForward;
+                } else {
+                    state._playerForward = this.playerController.getForward();
+                }
+
+                // Combat
+                this.combatSystem.update(dt, ctx);
+                this.updateIslandIndicator();
+
+                // Entity AI
+                this.entityAISystem.update(dt, ctx);
+
+                // Cat AI
+                this.catAI.update(dt, ctx);
             }
 
-            // Update player forward direction for combat targeting.
-            // First person: read the camera's exact look direction (full 3D, pitch
-            // included) instead of the animated model's facing — the model's yaw is
-            // smoothed (slerp) toward the camera each frame, which is fine visually
-            // but adds a frame or two of lag that makes quick flick-shots whiff. The
-            // crosshair should always hit what it's actually centered on right now.
-            if (state.player.cameraMode === 'first' && !state.isOnBoat) {
-                const aimForward = new THREE.Vector3();
-                camera.getWorldDirection(aimForward);
-                state._playerForward = aimForward;
-            } else {
-                state._playerForward = this.playerController.getForward();
-            }
-
-            // Combat
-            this.combatSystem.update(dt, ctx);
-            this.updateIslandIndicator();
-
-            // Entity AI
-            this.entityAISystem.update(dt, ctx);
-
-            // Cat AI
-            this.catAI.update(dt, ctx);
-
-            // Particles & debris
+            // Particles & debris — kept outside the guard above so the reset's own
+            // explosion FX (spawned into state.debris just before this window opens)
+            // keeps animating through the gap instead of freezing.
             this.particleSystem.update(dt, ctx);
 
             // Multiplayer
