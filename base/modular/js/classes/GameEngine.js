@@ -292,7 +292,7 @@ export default class GameEngine {
         };
 
         // --- Planet 1: Starting Planet ---
-        const planet1 = this.factory.createPlanet(this.state.palette, 0, 0, 0, 15, true);
+        const planet1 = this.factory.createPlanet(this.state.palette, 0, 0, 0, 15, PLANETS[0].hasAtmosphere);
         this.world.add(planet1.group);
         this.islandGroups.push(planet1);
         this.groundPlanes.push(planet1.groundMesh);
@@ -369,7 +369,7 @@ export default class GameEngine {
 
         // --- Planet 2: Flora World ---
         const palette2 = this.factory.generatePalette(null);
-        const planet2 = this.factory.createPlanet(palette2, 100, 30, 0, 18, false);
+        const planet2 = this.factory.createPlanet(palette2, 100, 30, 0, 18, PLANETS[1].hasAtmosphere);
         this.world.add(planet2.group);
         this.islandGroups.push(planet2);
         this.groundPlanes.push(planet2.groundMesh);
@@ -433,7 +433,7 @@ export default class GameEngine {
 
         // --- Planet 3: Ancient Peaks ---
         const palette3 = this.factory.generatePalette('blue');
-        const planet3 = this.factory.createPlanet(palette3, 0, -20, 140, 30, false);
+        const planet3 = this.factory.createPlanet(palette3, 0, -20, 140, 30, PLANETS[2].hasAtmosphere);
         this.world.add(planet3.group);
         this.islandGroups.push(planet3);
         this.groundPlanes.push(planet3.groundMesh);
@@ -521,7 +521,7 @@ export default class GameEngine {
 
         // --- Planet 4: Rocky Outpost ---
         const palette4 = this.factory.generatePalette(null);
-        const planet4 = this.factory.createPlanet(palette4, -110, 40, -60, 14, false);
+        const planet4 = this.factory.createPlanet(palette4, -110, 40, -60, 14, PLANETS[3].hasAtmosphere);
         this.world.add(planet4.group);
         this.islandGroups.push(planet4);
         this.groundPlanes.push(planet4.groundMesh);
@@ -579,7 +579,7 @@ export default class GameEngine {
 
         // --- Planet 5: Distant World ---
         const palette5 = this.factory.generatePalette(null);
-        const planet5 = this.factory.createPlanet(palette5, 60, -50, -120, 16, false);
+        const planet5 = this.factory.createPlanet(palette5, 60, -50, -120, 16, PLANETS[4].hasAtmosphere);
         this.world.add(planet5.group);
         this.islandGroups.push(planet5);
         this.groundPlanes.push(planet5.groundMesh);

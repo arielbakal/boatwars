@@ -141,10 +141,10 @@ export const MINE_DROP_COUNT = 3;
 // Each planet is a sphere in 3D space with a radius
 export const PLANETS = [
     { name: "STARTING PLANET", x: 0, y: 0, z: 0, radius: 15, hasAtmosphere: true, palette: null, tier: 0 },
-    { name: "FLORA WORLD", x: 100, y: 30, z: 0, radius: 18, hasAtmosphere: false, palette: null, tier: 1 },
-    { name: "ANCIENT PEAKS", x: 0, y: -20, z: 140, radius: 30, hasAtmosphere: false, palette: 'blue', tier: 3 },
-    { name: "ROCKY OUTPOST", x: -110, y: 40, z: -60, radius: 14, hasAtmosphere: false, palette: null, tier: 2 },
-    { name: "DISTANT WORLD", x: 60, y: -50, z: -120, radius: 16, hasAtmosphere: false, palette: null, tier: 2 }
+    { name: "FLORA WORLD", x: 100, y: 30, z: 0, radius: 18, hasAtmosphere: true, palette: null, tier: 1 },
+    { name: "ANCIENT PEAKS", x: 0, y: -20, z: 140, radius: 30, hasAtmosphere: true, palette: 'blue', tier: 3 },
+    { name: "ROCKY OUTPOST", x: -110, y: 40, z: -60, radius: 14, hasAtmosphere: true, palette: null, tier: 2 },
+    { name: "DISTANT WORLD", x: 60, y: -50, z: -120, radius: 16, hasAtmosphere: true, palette: null, tier: 2 }
 ];
 
 // Per-tier creature difficulty multipliers (index = PLANETS[].tier). Deterministic —

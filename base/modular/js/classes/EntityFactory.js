@@ -300,13 +300,52 @@ export default class EntityFactory {
         surface.userData = { type: 'ground' };
         g.add(surface);
 
-        // Atmosphere glow
+        // Atmosphere glow — fresnel rim shader instead of a flat-opacity shell.
+        // BackSide sphere slightly larger than the surface wraps the planet's
+        // silhouette; only the far hemisphere's back faces render (near-side
+        // front faces are culled), and the fragment shader boosts opacity at
+        // grazing view angles so the glow reads as a thin halo hugging the
+        // edge rather than a uniform haze dome. Additive blending + no depth
+        // write means it never occludes anything and layers naturally over
+        // stars/other planets. Color/intensity are tinted per palette and
+        // vary slightly per planet via a deterministic hash of `seed` (no
+        // extra Math.random() calls — keeps this independent of RNG order).
+        // ShaderMaterial doesn't react to scene fog by default, which is what
+        // we want for a glow shell (see WorldManager's space fog).
         if (hasAtmosphere) {
-            const atmosGeo = new THREE.IcosahedronGeometry(radius * 1.08, detail + 1);
-            const atmosMat = new THREE.MeshBasicMaterial({
-                color: palette.background.clone().lerp(new THREE.Color(0x4488ff), 0.5),
+            const atmosScale = 1.06 + Math.abs(Math.sin(seed * 0.5)) * 0.04; // 1.06-1.10x radius
+            const atmosGeo = new THREE.IcosahedronGeometry(radius * atmosScale, detail + 1);
+            const atmosColor = palette.background.clone().lerp(palette.accent, 0.35);
+            const atmosIntensity = 0.9 + Math.abs(Math.sin(seed * 1.7)) * 0.4; // 0.9-1.3
+            const atmosMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    color: { value: atmosColor },
+                    intensity: { value: atmosIntensity }
+                },
+                vertexShader: `
+                    varying vec3 vNormal;
+                    varying vec3 vViewDir;
+                    void main() {
+                        vNormal = normalize(normalMatrix * normal);
+                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                        vViewDir = normalize(-mvPosition.xyz);
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 color;
+                    uniform float intensity;
+                    varying vec3 vNormal;
+                    varying vec3 vViewDir;
+                    void main() {
+                        float rim = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+                        float glow = pow(rim, 2.5) * intensity;
+                        gl_FragColor = vec4(color, glow);
+                    }
+                `,
                 transparent: true,
-                opacity: 0.12,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
                 side: THREE.BackSide
             });
             const atmos = new THREE.Mesh(atmosGeo, atmosMat);
