@@ -850,6 +850,49 @@ input[type=range] {
     text-align: center;
 }
 
+/* Multiplayer chat (near #mp-panel) */
+#mp-chat {
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+    border-top: 1px solid rgba(0, 255, 0, 0.2);
+    padding-top: 6px;
+}
+
+#mp-chat-log {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 110px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #0f0 #000;
+}
+
+.mp-chat-line {
+    color: #ddd;
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    line-height: 1.4;
+    word-wrap: break-word;
+}
+
+#mp-chat-input {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    color: #fff;
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    padding: 4px 6px;
+    outline: none;
+    width: 100%;
+}
+
+#mp-chat-input:focus {
+    border-color: #0f0;
+}
+
 /* =====================================================
    HP BAR
    ===================================================== */

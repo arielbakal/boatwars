@@ -66,6 +66,7 @@ export default class GameEngine {
         this.network = new NetworkManager();
         this.remotePlayers = new RemotePlayerManager(this.world, this.factory);
         this._setupNetworkCallbacks();
+        this._setupChatUI();
         this._lastSelectedSlot = null;
 
         this.inventorySystem.onInventoryChanged = () => {
@@ -865,6 +866,9 @@ export default class GameEngine {
         this.network.onInventoryUpdate = (id, data) => {
             this.remotePlayers.updateInventory(id, data);
         };
+        this.network.onChat = (id, text) => {
+            this._handleRemoteChat(id, text);
+        };
     }
 
     async connectMultiplayer(url) {
@@ -878,6 +882,7 @@ export default class GameEngine {
             // onWelcome (_setupNetworkCallbacks) once the real id/seed land.
             const btn = document.getElementById('mp-connect-btn');
             if (btn) { btn.textContent = 'DISCONNECT'; btn.classList.add('connected'); }
+            if (this.ui.mpChat) this.ui.mpChat.style.display = 'flex';
         } catch (err) {
             console.error('[Multiplayer] Connection failed:', err);
             this._showMultiplayerToast('Connection failed!');
@@ -892,6 +897,91 @@ export default class GameEngine {
         const status = document.getElementById('mp-status');
         if (status) status.textContent = 'Offline';
         this._showMultiplayerToast('Disconnected');
+        if (this.ui.mpChat) this.ui.mpChat.style.display = 'none';
+        if (this.ui.mpChatInput) this.ui.mpChatInput.blur();
+    }
+
+    /**
+     * Wire the multiplayer chat log + input (near #mp-panel). Only visible while
+     * network.connected (toggled in connectMultiplayer/disconnectMultiplayer above).
+     *
+     * Scheme: Enter opens the input (when connected, not already typing, and no
+     * other text field/dialog has focus) or click it directly; Enter inside it
+     * sends and blurs; Escape blurs without sending. Documented in the input's
+     * own placeholder text.
+     *
+     * Focus gating: InputHandler.setupKeyboard() early-returns on every game
+     * keydown/keyup while document.activeElement is this input (see
+     * InputHandler._isChatFocused), so typing here never moves the player or
+     * triggers game binds.
+     */
+    _setupChatUI() {
+        const chatWrap = document.getElementById('mp-chat');
+        const log = document.getElementById('mp-chat-log');
+        const input = document.getElementById('mp-chat-input');
+        if (!chatWrap || !log || !input) return;
+
+        this.ui.mpChat = chatWrap;
+        this.ui.mpChatLog = log;
+        this.ui.mpChatInput = input;
+
+        const MAX_LOG_LINES = 8;
+        this._appendChatLine = (id, text) => {
+            const line = document.createElement('div');
+            line.className = 'mp-chat-line';
+            line.textContent = `Player ${id}: ${text}`;
+            log.appendChild(line);
+            while (log.children.length > MAX_LOG_LINES) log.removeChild(log.firstChild);
+            log.scrollTop = log.scrollHeight;
+        };
+
+        const send = () => {
+            const text = input.value.trim().slice(0, 200);
+            if (text) this.network.sendChat(text);
+            input.value = '';
+            input.blur();
+        };
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); send(); } else if (e.key === 'Escape') { input.blur(); }
+        });
+
+        // Pointer lock and a focused text field don't mix well — drop it so the
+        // cursor/keyboard are usable, mirroring what happens when the NPC chat
+        // dialog or a dialog-box opens.
+        input.addEventListener('focus', () => {
+            if (document.pointerLockElement) document.exitPointerLock();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            if (!this.network.connected) return;
+            if (this.state.phase !== 'playing') return;
+            if (this.chatManager && this.chatManager.isOpen) return;
+            const dialog = document.getElementById('dialog-box');
+            if (dialog && dialog.style.display === 'flex') return;
+            const active = document.activeElement;
+            // Already focused here (this keydown will be handled by the listener
+            // above instead) or focused on some other text field (mp-url, the NPC
+            // chat input, etc.) — don't steal focus in either case.
+            if (active && (active === input || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+            input.focus();
+        });
+    }
+
+    /**
+     * Handle an incoming chat message (server relays 'chat' to EVERY client,
+     * including the sender — unlike world_event — so this is the single source
+     * of truth for both remote and our own echoed messages; sendChat() never
+     * appends optimistically).
+     */
+    _handleRemoteChat(id, text) {
+        if (!text) return;
+        const safeText = String(text).slice(0, 200);
+        if (this._appendChatLine) this._appendChatLine(id, safeText);
+        if (id !== this.network.playerId) {
+            this.remotePlayers.showChatBubble(id, safeText);
+        }
     }
 
     _showMultiplayerToast(msg) {

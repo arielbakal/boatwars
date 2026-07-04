@@ -92,6 +92,13 @@
             </script>
             <button id="mp-connect-btn">CONNECT</button>
             <div id="mp-player-count"></div>
+            <!-- Player chat: hidden until connected (toggled by GameEngine). Enter
+                 opens it (or click it directly); Enter inside sends and closes;
+                 Escape closes without sending. -->
+            <div id="mp-chat" style="display:none;">
+                <div id="mp-chat-log"></div>
+                <input type="text" id="mp-chat-input" placeholder="Enter to chat, Esc to close" maxlength="200">
+            </div>
         </div>
 
         <!-- Chat Interface -->

@@ -23,10 +23,21 @@ export default class InputHandler {
         return item ? item.type : null;
     }
 
+    /**
+     * True while the player is typing in the multiplayer chat input. Gates every
+     * game keybind below (w/a/s/d/space/shift, ship pitch, inventory digits,
+     * escape, g, c, e, r) so typing "wasd" moves the cursor in the text box
+     * instead of the player in the world.
+     */
+    _isChatFocused() {
+        return !!document.activeElement && document.activeElement.id === 'mp-chat-input';
+    }
+
     setupKeyboard() {
         const state = this.engine.state;
         const sfx = this.engine.audio;
         document.addEventListener('keydown', (e) => {
+            if (this._isChatFocused()) return;
             const k = e.key.toLowerCase();
             if (k === 'w') state.inputs.w = true;
             if (k === 'a') state.inputs.a = true;
@@ -86,6 +97,7 @@ export default class InputHandler {
             }
         });
         document.addEventListener('keyup', (e) => {
+            if (this._isChatFocused()) return;
             const k = e.key.toLowerCase();
             if (k === 'w') state.inputs.w = false;
             if (k === 'a') state.inputs.a = false;

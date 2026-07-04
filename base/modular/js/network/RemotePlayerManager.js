@@ -151,6 +151,8 @@ export default class RemotePlayerManager {
             attackSeq: data.attackSeq || 0,
             isSwingingAttack: false,
             attackSwingTimer: 0,
+            chatBubble: null,
+            chatBubbleTimer: 0,
             inventory: data.inventory || null,
             selectedSlot: data.selectedSlot ?? null
         });
@@ -170,9 +172,53 @@ export default class RemotePlayerManager {
         const p = this.players.get(id);
         if (!p) return;
         this._removeRemoteShip(p);
+        this._removeChatBubble(p);
         this.world.remove(p.group);
         this.players.delete(id);
         console.log(`[Remote] Player ${id} removed`);
+    }
+
+    // ===========================================
+    // CHAT BUBBLE (Strategy D unit 3)
+    // ===========================================
+
+    /** Show a floating text bubble above the player's nametag for ~4s. */
+    showChatBubble(id, text) {
+        const p = this.players.get(id);
+        if (!p) return;
+        this._removeChatBubble(p);
+
+        const display = String(text).slice(0, 60);
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 64;
+        const c = canvas.getContext('2d');
+        c.fillStyle = 'rgba(0,0,0,0.65)';
+        c.fillRect(0, 0, 256, 64);
+        c.fillStyle = '#ffffff';
+        c.font = '16px sans-serif';
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillText(display, 128, 32);
+        const tex = new THREE.CanvasTexture(canvas);
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+        sprite.scale.set(1.6, 0.4, 1);
+        sprite.position.y = 2.2; // above the nametag sprite (y = 1.8)
+        p.group.add(sprite);
+        p.chatBubble = sprite;
+        p.chatBubbleTimer = 4.0;
+    }
+
+    /** Dispose the canvas texture/material and detach the bubble sprite. */
+    _removeChatBubble(p) {
+        if (!p.chatBubble) return;
+        p.group.remove(p.chatBubble);
+        if (p.chatBubble.material) {
+            if (p.chatBubble.material.map) p.chatBubble.material.map.dispose();
+            p.chatBubble.material.dispose();
+        }
+        p.chatBubble = null;
+        p.chatBubbleTimer = 0;
     }
 
     /**
@@ -466,6 +512,11 @@ export default class RemotePlayerManager {
                 this._resetSeatedPose(p);
             }
             p._wasOnBoat = p.isOnBoat;
+
+            if (p.chatBubbleTimer > 0) {
+                p.chatBubbleTimer -= dt;
+                if (p.chatBubbleTimer <= 0) this._removeChatBubble(p);
+            }
 
             if (p.isOnBoat) {
                 // Seated — walk/chop/mine animation is suppressed entirely while piloting.

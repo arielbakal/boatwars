@@ -17,6 +17,7 @@ export default class NetworkManager {
         this.onWorldEvent = null;         // callback(event)
         this.onWelcome = null;            // callback(data) - receives seed, playerCount
         this.onInventoryUpdate = null;    // callback(id, data)
+        this.onChat = null;               // callback(playerId, text)
         this._sendQueue = [];
         this._lastSendTime = 0;
         this.SEND_RATE = 1000 / 20;       // 20 ticks/sec
@@ -120,6 +121,16 @@ export default class NetworkManager {
     }
 
     /**
+     * Send a chat message. The server relays 'chat' to ALL clients including the
+     * sender (unlike world_event, which excludes the sender) — see MessageProtocol
+     * shape notes in RemotePlayerManager/GameEngine. Unthrottled, like world_event.
+     */
+    sendChat(text) {
+        if (!this.connected) return;
+        this._send(MessageProtocol.encode({ type: 'chat', text }));
+    }
+
+    /**
      * Broadcast inventory snapshot to other players
      */
     sendInventoryUpdate(inventory, selectedSlot) {
@@ -192,6 +203,11 @@ export default class NetworkManager {
 
             case 'inventory_update':
                 if (this.onInventoryUpdate) this.onInventoryUpdate(msg.id, msg);
+                break;
+
+            case 'chat':
+                // Server relay shape: { type: 'chat', playerId, text } (server/index.js).
+                if (this.onChat) this.onChat(msg.playerId, msg.text);
                 break;
         }
     }
