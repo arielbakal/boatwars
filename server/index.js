@@ -101,14 +101,25 @@ wss.on('connection', (ws) => {
                 case 'player_state':
                     playerData.position = msg.position;
                     playerData.rotation = msg.rotation;
-                    // Relay to other players
+                    // Relay to other players. Explicit allowlist (not a spread of `msg`)
+                    // so this stays a deliberate contract — see NetworkManager.sendPlayerState
+                    // for the full set of fields a client actually sends.
                     broadcast(ws, JSON.stringify({
                         type: 'player_state',
                         id: playerId,
                         position: msg.position,
                         rotation: msg.rotation,
                         isOnBoat: msg.isOnBoat,
-                        activeAction: msg.activeAction
+                        activeAction: msg.activeAction,
+                        // One-shot melee swing counter — remote clients diff this against
+                        // their last-seen value to trigger the attack animation.
+                        attackSeq: msg.attackSeq,
+                        // Full 3D ship transform + speed, used by RemotePlayerManager to
+                        // render a piloted remote ship exactly instead of approximating
+                        // it from position-delta heading.
+                        shipPosition: msg.shipPosition,
+                        shipQuaternion: msg.shipQuaternion,
+                        shipSpeed: msg.shipSpeed
                     }));
                     break;
 

@@ -13,6 +13,8 @@ const _tmpAvatarAxis = new THREE.Vector3(0, 1, 0);
 const _tmpShipDelta = new THREE.Vector3();
 const _tmpShipForward = new THREE.Vector3(0, 0, -1);
 const _tmpShipUp = new THREE.Vector3(0, 1, 0);
+const _tmpShipTargetPos = new THREE.Vector3();
+const _tmpShipTargetQuat = new THREE.Quaternion();
 
 export default class RemotePlayerManager {
     constructor(world, factory) {
@@ -147,7 +149,15 @@ export default class RemotePlayerManager {
             _wasOnBoat: false,
             ship: null,           // lazily-built remote-only ship model (see _updateRemoteShip)
             shipHeading: null,    // last observed movement direction, used as a quaternion proxy
-            shipSpeedSmoothed: 0, // derived speed (position delta / dt) for the engine-glow pulse
+            shipSpeedSmoothed: 0, // smoothed [0,1] engine-glow ratio (either path below)
+            // Real ship transform relayed by the server (post server relay fix). Null
+            // when absent (older server/client, or pilot not on boat) — _updateRemoteShip
+            // falls back to the position-delta heuristic in that case.
+            netShipPosition: null,
+            netShipQuaternion: null,
+            netShipSpeed: 0,
+            shipPosCurrent: null,   // THREE.Vector3, lazily created once real data arrives
+            shipQuatCurrent: null,  // THREE.Quaternion, lazily created once real data arrives
             activeAction: null,
             // Baseline to the joining value so a nonzero attackSeq already in flight
             // doesn't fire a spurious swing the instant this player is added.
@@ -250,6 +260,10 @@ export default class RemotePlayerManager {
         }
         p.isOnBoat = data.isOnBoat || false;
         p.activeAction = data.activeAction || null;
+        // Real ship transform, when the server relays it (see _updateRemoteShip).
+        p.netShipPosition = data.shipPosition || null;
+        p.netShipQuaternion = data.shipQuaternion || null;
+        p.netShipSpeed = data.shipSpeed || 0;
         // A higher attackSeq than last observed means a swing happened since the
         // last packet — (re)start the one-shot swing regardless of whether a
         // previous one is still playing, so rapid attacks each get represented.
@@ -381,21 +395,18 @@ export default class RemotePlayerManager {
     // ===========================================
     // REMOTE SHIP RENDERING (Strategy D unit 1)
     // ===========================================
-    // The server's player_state relay (server/index.js) does NOT forward
-    // shipPosition/shipQuaternion/shipSpeed — only position/rotation/isOnBoat/
-    // activeAction reach other clients (see AUDIT.md + final report). This ship
-    // is therefore an approximation built entirely from those four fields:
+    // The server's player_state relay now forwards shipPosition/shipQuaternion/
+    // shipSpeed (server/index.js), so _updateRemoteShip below prefers the exact
+    // relayed transform when present. It still falls back to a position-delta
+    // approximation when those fields are absent — either an older server/client
+    // in the mix, or simply because this pilot isn't on a boat:
     //   - position: BoatSystem._positionPlayerOnShip sets the pilot's own
     //     position to boat.position + a small (~0.6 unit) seat offset every
     //     physics frame while piloting, so it doubles as a decent ship-anchor.
-    //   - orientation: no quaternion is available at all, so it's inferred from
-    //     observed movement heading, re-leveled against the nearest planet's
-    //     surface normal when close to one (mirrors BoatSystem's own grounded
-    //     vs. free-flight leveling split).
-    //   - speed (for the engine-glow pulse): derived from the position delta
-    //     instead of the never-relayed shipSpeed field.
-    // A real fix needs server/index.js's player_state case to pass those three
-    // fields through — out of scope here (client-files-only constraint).
+    //   - orientation: inferred from observed movement heading, re-leveled
+    //     against the nearest planet's surface normal when close to one (mirrors
+    //     BoatSystem's own grounded vs. free-flight leveling split).
+    //   - speed (for the engine-glow pulse): derived from the position delta.
 
     /** Build a fresh remote-only ship model, colored to match the pilot's avatar. */
     _buildRemoteShip(id) {
@@ -423,42 +434,68 @@ export default class RemotePlayerManager {
         }
         const ship = p.ship;
 
-        ship.position.copy(p.currentPos);
-
-        // Heading proxy: only updates while actually moving, so the ship keeps
-        // facing its last known direction while stopped instead of snapping.
-        _tmpShipDelta.copy(p.targetPos).sub(p.currentPos);
-        if (_tmpShipDelta.lengthSq() > 0.0004) {
-            p.shipHeading = (p.shipHeading || new THREE.Vector3()).copy(_tmpShipDelta).normalize();
-        }
-        const forward = p.shipHeading || _tmpShipForward;
-
-        // Flush to the nearest planet's surface normal when close to one (mirrors
-        // BoatSystem._levelToSurface); otherwise a stable world-up horizon (mirrors
-        // BoatSystem._autoLevelRoll's free-flight case).
-        _tmpShipUp.set(0, 1, 0);
-        if (islands && islands.length) {
-            const nearest = SphericalUtils.findNearestPlanet(ship.position, islands);
-            if (nearest && nearest.planet && nearest.distance < nearest.planet.radius * 1.5) {
-                _tmpShipUp.copy(ship.position).sub(nearest.planet.center).normalize();
+        if (p.netShipPosition && p.netShipQuaternion) {
+            // Exact path: the server relayed the pilot's real ship transform.
+            if (!p.shipPosCurrent) {
+                p.shipPosCurrent = new THREE.Vector3().copy(p.netShipPosition);
             }
-        }
-        const targetQ = SphericalUtils.getOrientationOnSurface(_tmpShipUp, forward);
-        ship.quaternion.slerp(targetQ, smoothFactor(0.12, dt));
+            if (!p.shipQuatCurrent) {
+                p.shipQuatCurrent = new THREE.Quaternion().copy(p.netShipQuaternion);
+            }
+            _tmpShipTargetPos.copy(p.netShipPosition);
+            _tmpShipTargetQuat.copy(p.netShipQuaternion);
+            p.shipPosCurrent.lerp(_tmpShipTargetPos, smoothFactor(0.25, dt));
+            p.shipQuatCurrent.slerp(_tmpShipTargetQuat, smoothFactor(0.25, dt));
 
-        // Derived-speed engine glow (shipSpeed is never relayed — see NOTE above).
-        const observedSpeed = _tmpShipDelta.length() / Math.max(dt, 0.0001);
-        p.shipSpeedSmoothed = THREE.MathUtils.lerp(p.shipSpeedSmoothed || 0, observedSpeed, smoothFactor(0.2, dt));
+            ship.position.copy(p.shipPosCurrent);
+            ship.quaternion.copy(p.shipQuatCurrent);
+
+            // shipSpeed is the sender's own state.boatSpeed — already on the same
+            // per-frame basis as SHIP_MAX_SPEED (see BoatSystem._updateEngineGlow's
+            // own speedRatio calc), so no unit conversion is needed here.
+            const ratio = THREE.MathUtils.clamp(Math.abs(p.netShipSpeed) / SHIP_MAX_SPEED, 0, 1);
+            p.shipSpeedSmoothed = THREE.MathUtils.lerp(p.shipSpeedSmoothed || 0, ratio, smoothFactor(0.2, dt));
+        } else {
+            // Fallback path: no relayed transform (older server/client mix, or this
+            // pilot isn't on a boat this frame) — approximate from position deltas.
+            ship.position.copy(p.currentPos);
+
+            // Heading proxy: only updates while actually moving, so the ship keeps
+            // facing its last known direction while stopped instead of snapping.
+            _tmpShipDelta.copy(p.targetPos).sub(p.currentPos);
+            if (_tmpShipDelta.lengthSq() > 0.0004) {
+                p.shipHeading = (p.shipHeading || new THREE.Vector3()).copy(_tmpShipDelta).normalize();
+            }
+            const forward = p.shipHeading || _tmpShipForward;
+
+            // Flush to the nearest planet's surface normal when close to one (mirrors
+            // BoatSystem._levelToSurface); otherwise a stable world-up horizon (mirrors
+            // BoatSystem._autoLevelRoll's free-flight case).
+            _tmpShipUp.set(0, 1, 0);
+            if (islands && islands.length) {
+                const nearest = SphericalUtils.findNearestPlanet(ship.position, islands);
+                if (nearest && nearest.planet && nearest.distance < nearest.planet.radius * 1.5) {
+                    _tmpShipUp.copy(ship.position).sub(nearest.planet.center).normalize();
+                }
+            }
+            const targetQ = SphericalUtils.getOrientationOnSurface(_tmpShipUp, forward);
+            ship.quaternion.slerp(targetQ, smoothFactor(0.12, dt));
+
+            // Derived-speed engine glow: position delta / dt is a units/second value,
+            // but SHIP_MAX_SPEED is on BoatSystem's un-dt-scaled per-frame (60fps) basis
+            // — *60 brings the reference max onto the same units/second footing.
+            const observedSpeed = _tmpShipDelta.length() / Math.max(dt, 0.0001);
+            const ratio = THREE.MathUtils.clamp(observedSpeed / (SHIP_MAX_SPEED * 60), 0, 1);
+            p.shipSpeedSmoothed = THREE.MathUtils.lerp(p.shipSpeedSmoothed || 0, ratio, smoothFactor(0.2, dt));
+        }
+
         this._updateRemoteEngineGlow(ship, p.shipSpeedSmoothed);
     }
 
-    _updateRemoteEngineGlow(ship, speedUnitsPerSecond) {
+    /** Apply an already-normalized [0,1] speed ratio to the cached engine-glow meshes. */
+    _updateRemoteEngineGlow(ship, ratio) {
         const glows = ship.userData._engineGlowMeshes;
         if (!glows || !glows.length) return;
-        // BoatSystem's ship speed is an un-dt-scaled per-frame delta (assumes 60fps);
-        // *60 converts SHIP_MAX_SPEED to the same units/second basis as our derived speed.
-        const referenceMax = SHIP_MAX_SPEED * 60;
-        const ratio = THREE.MathUtils.clamp(speedUnitsPerSecond / referenceMax, 0, 1);
         const opacity = THREE.MathUtils.clamp(0.35 + ratio * 0.55, 0.2, 1.0);
         const scale = 1 + ratio * 0.25;
         for (const glow of glows) {
@@ -475,6 +512,8 @@ export default class RemotePlayerManager {
         p.ship = null;
         p.shipHeading = null;
         p.shipSpeedSmoothed = 0;
+        p.shipPosCurrent = null;
+        p.shipQuatCurrent = null;
     }
 
     /** Seated pilot pose — mirrors BoatSystem.setSeatedPose, adapted to remote field names. */
