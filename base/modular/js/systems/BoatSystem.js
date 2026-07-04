@@ -168,6 +168,14 @@ export default class BoatSystem {
 
         if (playerController.playerGroup) {
             playerController.playerGroup.visible = true;
+            // _positionPlayerOnShip composes the hull's visual bank quaternion onto
+            // playerGroup.quaternion every physics frame (bankQuat multiplied on top
+            // of the ship orientation) but never clears it — without this the player
+            // stays visibly leaning for a few frames after stepping off, until some
+            // other system happens to re-orient them. boat.quaternion itself is the
+            // bank-free ship orientation (bank only ever touches hullPivot's local
+            // rotation.z, never boat.quaternion — see _updateBanking).
+            playerController.playerGroup.quaternion.copy(state.activeBoat.quaternion);
             this.resetSeatedPose(playerController);
         }
 
@@ -259,6 +267,17 @@ export default class BoatSystem {
             // camera.position.lerp() calls in one tick produced a one-frame snap
             // right at the boarding/flight handoff.
             return;
+        }
+
+        // Ease FOV back toward baseline during the walk — neither the on-foot
+        // (PlayerController.updateCamera) nor ship-flight (_updateCamera) FOV
+        // kick updaters run while isBoardingBoat, so a lingering speed-essence
+        // kick would otherwise stay frozen at its boosted value until boarding
+        // finishes.
+        const newFov = THREE.MathUtils.lerp(camera.fov, CAMERA_FOV, smoothFactor(FOV_KICK_LERP, dt));
+        if (Math.abs(newFov - camera.fov) > 0.01) {
+            camera.fov = newFov;
+            camera.updateProjectionMatrix();
         }
 
         // Camera follows during boarding

@@ -508,7 +508,11 @@ export default class PlayerController {
         // FOV speed kick: on-foot speed-sell for the speed essence, only while
         // actually moving. Applied before the mode branch so it works in both
         // third and first person.
-        const boostRatio = (this._isMoving && player.speedBoost > 0 && PLAYER_SPEED_BOOST_CAP > 0)
+        // update() early-returns entirely while state.isDead, so _isMoving would
+        // otherwise freeze at whatever it was the instant death hit — treat death
+        // as not-moving here so the kick eases back to CAMERA_FOV during the
+        // death screen instead of staying stuck boosted.
+        const boostRatio = (this._isMoving && !this.state.isDead && player.speedBoost > 0 && PLAYER_SPEED_BOOST_CAP > 0)
             ? Math.min(1, player.speedBoost / PLAYER_SPEED_BOOST_CAP)
             : 0;
         const targetFov = CAMERA_FOV + PLAYER_FOV_KICK * boostRatio;
