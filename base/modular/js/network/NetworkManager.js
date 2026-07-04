@@ -86,6 +86,12 @@ export default class NetworkManager {
             rotation: state.player.targetRotation || 0,
             isOnBoat: state.isOnBoat,
             activeAction: state.isChopping ? 'chop' : state.isMining ? 'mine' : null,
+            // Melee attack is a one-shot ~0.4s swing, not a held state like chop/mine,
+            // so a boolean risks being missed by an unluckily-timed 20Hz send. A
+            // monotonically-increasing counter is robust instead: remote clients
+            // trigger a full swing whenever they observe it increase, even if they
+            // only ever see one packet during the swing's lifetime.
+            attackSeq: state.attackSeq || 0,
             // Ship 3D state for remote rendering
             shipPosition: state.isOnBoat && state.activeBoat ? {
                 x: state.activeBoat.position.x,

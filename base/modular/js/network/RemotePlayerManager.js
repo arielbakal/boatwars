@@ -2,9 +2,9 @@
 // REMOTE PLAYER MANAGER - Renders other players in 3D
 // =====================================================
 
-import { smoothFactor } from '../classes/Easing.js';
+import { smoothFactor, easeInOutQuad } from '../classes/Easing.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
-import { SHIP_MAX_SPEED } from '../constants.js';
+import { SHIP_MAX_SPEED, ATTACK_SWING_DURATION, HIT_INTERVAL } from '../constants.js';
 
 // Reusable temp objects to reduce GC pressure in the per-frame update loop
 // (mirrors the _tmpVec convention in BoatSystem.js).
@@ -146,6 +146,11 @@ export default class RemotePlayerManager {
             shipHeading: null,    // last observed movement direction, used as a quaternion proxy
             shipSpeedSmoothed: 0, // derived speed (position delta / dt) for the engine-glow pulse
             activeAction: null,
+            // Baseline to the joining value so a nonzero attackSeq already in flight
+            // doesn't fire a spurious swing the instant this player is added.
+            attackSeq: data.attackSeq || 0,
+            isSwingingAttack: false,
+            attackSwingTimer: 0,
             inventory: data.inventory || null,
             selectedSlot: data.selectedSlot ?? null
         });
@@ -184,6 +189,14 @@ export default class RemotePlayerManager {
         }
         p.isOnBoat = data.isOnBoat || false;
         p.activeAction = data.activeAction || null;
+        // A higher attackSeq than last observed means a swing happened since the
+        // last packet — (re)start the one-shot swing regardless of whether a
+        // previous one is still playing, so rapid attacks each get represented.
+        if (data.attackSeq !== undefined && data.attackSeq !== p.attackSeq) {
+            p.attackSeq = data.attackSeq;
+            p.isSwingingAttack = true;
+            p.attackSwingTimer = 0;
+        }
     }
 
     /**
@@ -459,27 +472,80 @@ export default class RemotePlayerManager {
                 continue;
             }
 
-            if (isMoving) {
+            // One-shot attack swing takes priority over walk/chop-mine, mirroring
+            // PlayerController.update()'s own branch order (isAttacking first).
+            if (p.isSwingingAttack) {
+                p.attackSwingTimer += dt;
+                if (p.attackSwingTimer >= ATTACK_SWING_DURATION) {
+                    p.isSwingingAttack = false;
+                    p.attackSwingTimer = 0;
+                    p.armR.rotation.x = 0;
+                    p.armL.rotation.x = 0;
+                } else {
+                    const [armAngleR, armAngleL] = this._attackSwingAngles(p.attackSwingTimer / ATTACK_SWING_DURATION);
+                    p.armR.rotation.x = armAngleR;
+                    p.armL.rotation.x = armAngleL;
+                }
+            } else if (isMoving) {
                 const walkCycle = p.time * 10;
                 p.legL.rotation.x = Math.sin(walkCycle) * 0.8;
                 p.legR.rotation.x = Math.sin(walkCycle + Math.PI) * 0.8;
                 p.armL.rotation.x = Math.sin(walkCycle + Math.PI) * 0.5;
                 p.armR.rotation.x = Math.sin(walkCycle) * 0.5;
+            } else if (p.activeAction === 'chop' || p.activeAction === 'mine') {
+                p.armR.rotation.x = this._choppingSwingAngle(p.time);
             } else {
-                // Action animations
-                if (p.activeAction === 'chop' || p.activeAction === 'mine') {
-                    const swing = p.time * 8;
-                    p.armR.rotation.x = Math.sin(swing) * 1.2;
-                } else {
-                    // Flat 0.1 decay toward 0 (`x *= 1 - k` == `x += (0 - x) * k`), dt-corrected
-                    const lerp = smoothFactor(0.1, dt);
-                    p.legL.rotation.x *= (1 - lerp);
-                    p.legR.rotation.x *= (1 - lerp);
-                    p.armL.rotation.x *= (1 - lerp);
-                    p.armR.rotation.x *= (1 - lerp);
-                }
+                // Flat 0.1 decay toward 0 (`x *= 1 - k` == `x += (0 - x) * k`), dt-corrected
+                const lerp = smoothFactor(0.1, dt);
+                p.legL.rotation.x *= (1 - lerp);
+                p.legR.rotation.x *= (1 - lerp);
+                p.armL.rotation.x *= (1 - lerp);
+                p.armR.rotation.x *= (1 - lerp);
             }
         }
+    }
+
+    /**
+     * One-shot melee swing angles for [armR, armL], keyed by normalized progress
+     * (0..1) through ATTACK_SWING_DURATION. Ported directly from PlayerController
+     * .update()'s `state.isAttacking` branch so remote swings match the local
+     * player's swing shape/duration exactly.
+     */
+    _attackSwingAngles(swingT) {
+        let armAngleR, armAngleL;
+        if (swingT < 0.4) {
+            const t = easeInOutQuad(swingT / 0.4);
+            armAngleR = -1.8 * t;
+            armAngleL = -1.4 * t;
+        } else if (swingT < 0.8) {
+            const t = easeInOutQuad((swingT - 0.4) / 0.4);
+            armAngleR = -1.8 + (1.8 + 1.2) * t;
+            armAngleL = -1.4 + (1.4 + 0.8) * t;
+        } else {
+            const t = easeInOutQuad((swingT - 0.8) / 0.2);
+            armAngleR = 1.2 * (1 - t);
+            armAngleL = 0.8 * (1 - t);
+        }
+        return [armAngleR, armAngleL];
+    }
+
+    /**
+     * Eased, phase-clamped chop/mine swing — replaces the old unclamped
+     * `sin(time*8)*1.2` (which oscillated forever with no rest pose). No per-hit
+     * timing is available over the network (activeAction is just a held on/off
+     * flag), so this self-loops on HIT_INTERVAL using the remote player's own
+     * accumulated time: a short eased swing at the start of each cycle, holding
+     * the lowered rest pose (matches PlayerController's chopAnimState formula)
+     * for the remainder.
+     */
+    _choppingSwingAngle(t) {
+        const SWING_DURATION = 0.15; // mirrors ChopSystem/MineSystem's per-hit swing length
+        const cyclePos = t % HIT_INTERVAL;
+        if (cyclePos < SWING_DURATION) {
+            const swingT = 1 - (cyclePos / SWING_DURATION);
+            return -1.2 + easeInOutQuad(swingT) * 2.2;
+        }
+        return -1.2;
     }
 
     /**

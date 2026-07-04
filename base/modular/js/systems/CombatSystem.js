@@ -61,6 +61,10 @@ export default class CombatSystem {
         state.attackCooldown = ATTACK_COOLDOWN;
         state.isAttacking = true;
         state._attackVisualTimer = 0;
+        // Bump the network-facing swing counter so remote clients can trigger their
+        // own copy of this swing on the next player_state packet (see NetworkManager
+        // .sendPlayerState / RemotePlayerManager.updatePlayer).
+        state.attackSeq = (state.attackSeq || 0) + 1;
 
         audio.chop();
 

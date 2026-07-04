@@ -41,6 +41,12 @@ export default class GameState {
         // Combat
         this.attackCooldown = 0;
         this.isAttacking = false;
+        // Monotonically-increasing counter, incremented once per executed melee
+        // swing (CombatSystem.tryAttack) and broadcast over the network so remote
+        // clients can detect "a swing happened" even though the swing itself is a
+        // one-shot ~0.4s event — far shorter-lived than isAttacking would be
+        // reliable for catching on a 20Hz send tick under packet-timing edge cases.
+        this.attackSeq = 0;
         this.invincibleTimer = 0;
         this.isDead = false;
         this.deathTimer = 0;
