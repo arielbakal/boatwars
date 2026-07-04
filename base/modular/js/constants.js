@@ -125,6 +125,11 @@ export const MAX_FOODS = 30;            // population cap to prevent food overlo
 // Inventory
 export const INVENTORY_SLOTS = 8;
 export const NON_STACKABLE_TYPES = ['creature', 'egg', 'axe', 'pickaxe'];
+// Base resources stack by type alone — per-planet palette colors would otherwise
+// split them into one slot per planet and exhaust the inventory. Single source of
+// truth shared by GameEngine.addToInventory and InventoryManager (addToInventory +
+// _canPickup) so the two pickup paths can never drift apart again.
+export const STACKS_BY_TYPE = ['wood', 'rock', 'gold'];
 
 // Particles
 export const PARTICLE_GRAVITY = 0.002;

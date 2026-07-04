@@ -5,6 +5,7 @@
 import {
     INVENTORY_SLOTS,
     NON_STACKABLE_TYPES,
+    STACKS_BY_TYPE,
     PICKUP_RANGE,
     CRAFT_HINT_DURATION
 } from '../constants.js';
@@ -21,8 +22,13 @@ export default class InventoryManager {
     addToInventory(type, color, style, age = 0) {
         const isStackable = NON_STACKABLE_TYPES.indexOf(type) === -1;
         if (isStackable) {
+            // Mirrors GameEngine.addToInventory's stacksByType branch exactly (via the
+            // shared STACKS_BY_TYPE constant) — this path is the auto-pickup magnetism
+            // route (_collectAutoPickup below), which used to stack strictly by exact
+            // color and silently fragmented wood/rock/gold across inventory slots.
+            const stacksByType = STACKS_BY_TYPE.indexOf(type) !== -1;
             const existingIdx = this.state.inventory.findIndex(item =>
-                item && item.type === type && item.color.getHex() === color.getHex()
+                item && item.type === type && (stacksByType || item.color.getHex() === color.getHex())
             );
             if (existingIdx !== -1) {
                 this.state.inventory[existingIdx].count = (this.state.inventory[existingIdx].count || 1) + 1;
@@ -126,8 +132,13 @@ export default class InventoryManager {
     _canPickup(type, color) {
         const isStackable = NON_STACKABLE_TYPES.indexOf(type) === -1;
         if (isStackable) {
+            // Must agree with addToInventory above (and GameEngine.addToInventory) on
+            // whether this type stacks across colors — otherwise an item could be
+            // magnetized here as "pickupable" and then fail to actually stack once it
+            // reaches addToInventory, or vice versa.
+            const stacksByType = STACKS_BY_TYPE.indexOf(type) !== -1;
             const existingIdx = this.state.inventory.findIndex(item =>
-                item && item.type === type && item.color.getHex() === color.getHex()
+                item && item.type === type && (stacksByType || item.color.getHex() === color.getHex())
             );
             if (existingIdx !== -1) return true;
         }
@@ -160,10 +171,19 @@ export default class InventoryManager {
         }
     }
 
-    /** Wires the resource HUD (#log-count) to the live wood count in inventory. */
+    /**
+     * Wires the resource HUD (#log-count) to the live wood count in inventory.
+     * Sums across ALL wood stacks (not just the first found) — stacksByType keeps
+     * new pickups merging into a single stack, but a save/session that already had
+     * multiple wood stacks from before that fix (different colors, never merged)
+     * would otherwise silently undercount.
+     */
     _updateWoodHUD(state) {
-        const woodItem = state.inventory.find(it => it && it.type === 'wood');
-        if (this.ui.logCount) this.ui.logCount.textContent = woodItem ? (woodItem.count || 1) : 0;
+        const totalWood = state.inventory.reduce(
+            (sum, it) => (it && it.type === 'wood') ? sum + (it.count || 1) : sum,
+            0
+        );
+        if (this.ui.logCount) this.ui.logCount.textContent = totalWood;
     }
 
     /**

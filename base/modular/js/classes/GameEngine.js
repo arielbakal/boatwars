@@ -25,7 +25,7 @@ import NetworkManager from '../network/NetworkManager.js';
 import RemotePlayerManager from '../network/RemotePlayerManager.js';
 import SeededRandom from '../network/SeededRandom.js';
 
-import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV, RENDER_SCALE } from '../constants.js';
+import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV, RENDER_SCALE, STACKS_BY_TYPE } from '../constants.js';
 
 export default class GameEngine {
     constructor() {
@@ -136,7 +136,9 @@ export default class GameEngine {
         if (isStackable) {
             // Base resources stack by type alone — per-planet palette colors would
             // otherwise split them into one slot per planet and exhaust the inventory.
-            const stacksByType = ['wood', 'rock', 'gold'].indexOf(type) !== -1;
+            // STACKS_BY_TYPE is shared with InventoryManager's addToInventory/_canPickup
+            // (the auto-pickup magnetism path) so both pickup routes always agree.
+            const stacksByType = STACKS_BY_TYPE.indexOf(type) !== -1;
             const existingIdx = this.state.inventory.findIndex(item =>
                 item && item.type === type && (stacksByType || item.color.getHex() === color.getHex())
             );
