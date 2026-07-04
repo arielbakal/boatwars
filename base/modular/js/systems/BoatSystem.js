@@ -19,7 +19,8 @@ import {
     SHIP_DAMAGE_SPEED_HP_THRESHOLD, SHIP_DAMAGED_MIN_SPEED_MULT,
     SHIP_REPAIR_GOLD_COST, SHIP_REPAIR_HEAL_AMOUNT,
     BOARDING_WALK_SPEED, CAT_BOARDING_DELAY,
-    CAMERA_DISTANCE_BOAT, CAMERA_FOV, SHIP_FOV_KICK, FOV_KICK_LERP
+    CAMERA_DISTANCE_BOAT, CAMERA_FOV, SHIP_FOV_KICK, FOV_KICK_LERP,
+    SHIP_BANK_MAX, SHIP_BANK_LERP
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
 import { smoothFactor } from '../classes/Easing.js';
@@ -32,6 +33,8 @@ const _tmpVec4 = new THREE.Vector3();
 const _tmpGravity = new THREE.Vector3();
 const _tmpQuat = new THREE.Quaternion();
 const _tmpQuat2 = new THREE.Quaternion();
+const _tmpBankAxis = new THREE.Vector3(0, 0, 1); // ship-local forward/roll axis, never mutated
+const _tmpBankQuat = new THREE.Quaternion();
 
 export default class BoatSystem {
     constructor(ui) {
@@ -325,6 +328,28 @@ export default class BoatSystem {
     }
 
     // ===========================================
+    // VISUAL BANKING (game feel only)
+    // ===========================================
+
+    /**
+     * Roll the ship's hullPivot (see EntityFactory.createSpaceship) into turns while
+     * flying, purely as a visual flourish — `boat.quaternion` and `state.shipQuaternion`
+     * (physics/orientation, read by the cameras and collision math) are never touched.
+     * Bank angle is cached on boat.userData._bankAngle so it eases smoothly both toward
+     * and away from SHIP_BANK_MAX regardless of how long the turn/level lasts.
+     */
+    _updateBanking(state, boat, yawInput, dt) {
+        const hullPivot = boat.userData.hullPivot;
+        if (!hullPivot) return;
+
+        const bankTarget = state.shipGrounded ? 0 : -yawInput * SHIP_BANK_MAX;
+        const current = boat.userData._bankAngle || 0;
+        const bankAngle = THREE.MathUtils.lerp(current, bankTarget, smoothFactor(SHIP_BANK_LERP, dt));
+        boat.userData._bankAngle = bankAngle;
+        hullPivot.rotation.z = bankAngle;
+    }
+
+    // ===========================================
     // DAMAGE / REPAIR
     // ===========================================
 
@@ -430,12 +455,19 @@ export default class BoatSystem {
         const q = state.shipQuaternion;
 
         // Yaw (A/D) — rotate around ship's local Y-axis at a constant rate
-        if (state.inputs.a || state.inputs.d) {
-            const yawDelta = state.inputs.a ? SHIP_YAW_SPEED : -SHIP_YAW_SPEED;
+        const yawInput = state.inputs.a ? 1 : state.inputs.d ? -1 : 0;
+        if (yawInput !== 0) {
+            const yawDelta = yawInput * SHIP_YAW_SPEED;
             const shipUp = _tmpVec.set(0, 1, 0).applyQuaternion(q).normalize();
             _tmpQuat.setFromAxisAngle(shipUp, yawDelta);
             q.premultiply(_tmpQuat).normalize();
         }
+
+        // Visual-only banking (game feel): roll the hull pivot into turns while
+        // flying. This never touches `q` (physics/orientation, read directly by the
+        // chase/cockpit cameras) or `boat.quaternion` (set from `q` below) — only the
+        // hullPivot child's local rotation.z, eased both in and out.
+        this._updateBanking(state, boat, yawInput, dt);
 
         // Pitch (Arrow Up/Down or R/F) — nose up / nose down
         const pitchInput = state.inputs.pitchUp ? 1 : state.inputs.pitchDown ? -1 : 0;
@@ -615,8 +647,14 @@ export default class BoatSystem {
 
         if (pc.playerGroup) {
             pc.playerGroup.position.copy(state.player.pos);
-            // Orient player group to match ship orientation
-            pc.playerGroup.quaternion.copy(q);
+            // Orient player group to match ship orientation. The player isn't parented
+            // to the ship's mesh hierarchy (it's a separate world-space object), so the
+            // hullPivot's visual bank roll (see _updateBanking) is composed in here too
+            // — a seated player should lean with the hull they're strapped to, not sit
+            // rigidly level while the ship rolls under them.
+            const bankAngle = boat.userData._bankAngle || 0;
+            _tmpBankQuat.setFromAxisAngle(_tmpBankAxis, bankAngle);
+            pc.playerGroup.quaternion.copy(q).multiply(_tmpBankQuat);
         }
     }
 

@@ -784,23 +784,31 @@ export default class EntityFactory {
         const darkMetal = color.clone().multiplyScalar(0.6);
         const lightMetal = color.clone().lerp(new THREE.Color(0xddccee), 0.3);
 
+        // Hull pivot: holds every visible ship mesh (and the deck the player stands
+        // on). `g`'s own quaternion is pure physics/orientation (yaw/pitch/auto-level,
+        // read directly by the chase/cockpit cameras) — BoatSystem banks this child
+        // pivot's local rotation.z into turns instead, so the visual roll never
+        // touches physics, camera math, or collision. See BoatSystem for the bank logic.
+        const hullPivot = new THREE.Group();
+        g.add(hullPivot);
+
         // Main hull (elongated)
         const hullGeo = new THREE.BoxGeometry(1.6, 0.6, 3.8);
         const hull = new THREE.Mesh(hullGeo, this.getMat(darkMetal));
-        g.add(hull);
+        hullPivot.add(hull);
 
         // Upper hull
         const upperGeo = new THREE.BoxGeometry(1.2, 0.4, 2.8);
         const upper = new THREE.Mesh(upperGeo, this.getMat(color));
         upper.position.y = 0.4;
-        g.add(upper);
+        hullPivot.add(upper);
 
         // Cockpit dome
         const cockpitGeo = new THREE.SphereGeometry(0.5, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
         const cockpitMat = new THREE.MeshPhongMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5, flatShading: true });
         const cockpit = new THREE.Mesh(cockpitGeo, cockpitMat);
         cockpit.position.set(0, 0.5, -0.8);
-        g.add(cockpit);
+        hullPivot.add(cockpit);
 
         // Wings
         [-1, 1].forEach(side => {
@@ -808,7 +816,7 @@ export default class EntityFactory {
             const wing = new THREE.Mesh(wingGeo, this.getMat(darkMetal));
             wing.position.set(side * 1.5, 0, 0.2);
             wing.rotation.z = side * 0.1;
-            g.add(wing);
+            hullPivot.add(wing);
         });
 
         // Engine nozzles
@@ -817,7 +825,7 @@ export default class EntityFactory {
             const nozzle = new THREE.Mesh(nozzleGeo, this.getMat(0x333333));
             nozzle.rotation.x = Math.PI / 2;
             nozzle.position.set(xOff, -0.1, 2.1);
-            g.add(nozzle);
+            hullPivot.add(nozzle);
 
             // Engine glow
             const glowMat = new THREE.MeshBasicMaterial({ color: 0x44aaff, transparent: true, opacity: 0.6 });
@@ -825,20 +833,21 @@ export default class EntityFactory {
             const glow = new THREE.Mesh(glowGeo, glowMat);
             glow.position.set(xOff, -0.1, 2.35);
             glow.userData = { isEngineGlow: true };
-            g.add(glow);
+            hullPivot.add(glow);
         });
 
         // Deck platform (for the player to stand on)
         const deckGeo = new THREE.BoxGeometry(1.2, 0.08, 2.0);
         const deck = new THREE.Mesh(deckGeo, this.getMat(lightMetal));
         deck.position.y = 0.65;
-        g.add(deck);
+        hullPivot.add(deck);
 
         g.position.set(x, y, z);
         g.userData = {
             type: 'spaceship',
             color: color,
             radius: 2.5,
+            hullPivot: hullPivot,
             stats: {
                 health: BOAT_BASE_HEALTH,
                 maxHealth: BOAT_BASE_HEALTH,

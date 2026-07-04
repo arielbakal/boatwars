@@ -71,6 +71,10 @@ export const SHIP_GRAVITY_STRENGTH = 0.002;    // gravity acceleration at the su
 export const SHIP_GRAVITY_RANGE = 4.0;         // gravity acts within this multiple of planet radius
 export const SHIP_AUTO_LEVEL_SPEED = 0.03;     // roll auto-correction rate
 
+// Spaceship visual banking (game feel only — does not affect the physics quaternion)
+export const SHIP_BANK_MAX = 0.35;      // max visual roll angle (radians) while turning
+export const SHIP_BANK_LERP = 0.1;      // 60fps-tuned smoothing rate; used via smoothFactor(SHIP_BANK_LERP, dt)
+
 // Spaceship takeoff / taxi (airplane-style grounded phase)
 export const SHIP_TAKEOFF_SPEED = 0.12;        // forward speed required to lift off the surface
 export const SHIP_TAKEOFF_ALTITUDE = 1.5;      // altitude above belly-rest at which flight frees up
