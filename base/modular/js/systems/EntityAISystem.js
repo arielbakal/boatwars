@@ -78,6 +78,14 @@ export default class EntityAISystem {
                 }
             }
 
+            // --- Per-species creature locomotion life (squash/waddle/lean on the
+            // body+eyes sub-pivot; NEVER touches the group's own scale/quaternion,
+            // which are owned by pop-in and dying-shrink respectively) ---
+            if (e.userData.type === 'creature' && e.userData.animPivot &&
+                !e.userData._dying && !e.userData.exploding && e.userData.hp > 0) {
+                this._animateCreatureLocomotion(e, dt, t);
+            }
+
             // --- Food production (trees & bushes) ---
             if (e.userData.type === 'tree' || e.userData.type === 'bush') {
                 e.userData.productionTimer = (e.userData.productionTimer || 0) + dt;
@@ -126,6 +134,64 @@ export default class EntityAISystem {
         });
     }
 
+    /**
+     * Per-species locomotion life, animated on the creature's body+eyes sub-pivot
+     * (e.userData.animPivot — see EntityFactory.createCreature). e.userData._isMoving
+     * is the single source of truth for "is this creature currently translating" and
+     * is set by updateCreature() (food-seek/wander) and CombatSystem._updateCreatureAggro
+     * (chase) — whichever system actually moved the creature this frame.
+     */
+    _animateCreatureLocomotion(e, dt, t) {
+        const pivot = e.userData.animPivot;
+        const isMoving = !!e.userData._isMoving;
+        const species = e.userData.speciesType;
+        const phase = t * 5 + (e.userData.hopOffset || 0);
+
+        if (species === 'blobby') {
+            // Springy squash-and-stretch synced to the bob: compress at the bottom
+            // of the cycle, stretch rising, with x/z counter-scaled to preserve volume.
+            let targetScaleY = 1, targetScaleXZ = 1;
+            if (isMoving) {
+                const bob = Math.sin(phase);
+                targetScaleY = bob < 0 ? 1 + bob * 0.15 : 1 + bob * 0.12; // ~0.85 .. ~1.12
+                targetScaleXZ = 1 / Math.sqrt(targetScaleY);
+            }
+            const k = smoothFactor(0.25, dt);
+            pivot.scale.set(
+                THREE.MathUtils.lerp(pivot.scale.x, targetScaleXZ, k),
+                THREE.MathUtils.lerp(pivot.scale.y, targetScaleY, k),
+                THREE.MathUtils.lerp(pivot.scale.z, targetScaleXZ, k)
+            );
+        } else if (species === 'blocky') {
+            // Side-to-side waddle roll, barely any bob.
+            const targetRoll = isMoving ? Math.sin(phase) * 0.12 : 0;
+            const targetBob = isMoving ? Math.abs(Math.sin(phase)) * 0.015 : 0;
+            const k = smoothFactor(0.2, dt);
+            pivot.rotation.z = THREE.MathUtils.lerp(pivot.rotation.z, targetRoll, k);
+            pivot.position.y = THREE.MathUtils.lerp(pivot.position.y, targetBob, k);
+        } else if (species === 'conehead') {
+            // Forward glide lean into movement...
+            const targetPitch = isMoving ? 0.15 : 0;
+            pivot.rotation.x = THREE.MathUtils.lerp(pivot.rotation.x, targetPitch, smoothFactor(0.2, dt));
+
+            // ...and lean into turns, from a signed yaw-rate estimate (frame-to-frame
+            // change of the creature's forward direction around its local up axis).
+            const curFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(e.quaternion);
+            let yawRate = 0;
+            if (e.userData._prevFwd) {
+                const planet = e.userData.planet;
+                const normal = planet ? SphericalUtils.getSurfaceNormal(e.position, planet) : new THREE.Vector3(0, 1, 0);
+                const cross = new THREE.Vector3().crossVectors(e.userData._prevFwd, curFwd);
+                const sign = cross.dot(normal) >= 0 ? 1 : -1;
+                const dot = THREE.MathUtils.clamp(e.userData._prevFwd.dot(curFwd), -1, 1);
+                yawRate = dt > 0 ? (sign * Math.acos(dot)) / dt : 0;
+            }
+            e.userData._prevFwd = curFwd;
+            const targetLean = THREE.MathUtils.clamp(yawRate * 0.3, -0.25, 0.25);
+            pivot.rotation.z = THREE.MathUtils.lerp(pivot.rotation.z, targetLean, smoothFactor(0.2, dt));
+        }
+    }
+
     updateCreature(e, idx, dt, context) {
         const { state, world, audio, factory } = context;
         const planet = e.userData.planet;
@@ -156,6 +222,7 @@ export default class EntityAISystem {
             });
 
             if (nearestFood && minDist < 0.5) {
+                e.userData._isMoving = false;
                 audio.eat();
                 world.remove(nearestFood);
                 state.foods.splice(state.foods.indexOf(nearestFood), 1);
@@ -184,10 +251,13 @@ export default class EntityAISystem {
                     const dir = nearestFood.position.clone().sub(e.position).normalize();
                     const newPos = SphericalUtils.moveOnSurface(e.position, dir, e.userData.moveSpeed, planet);
                     e.position.copy(newPos);
+                    e.userData._isMoving = true;
                     // Orient to face food
                     const normal = SphericalUtils.getSurfaceNormal(e.position, planet);
                     const q = SphericalUtils.getOrientationOnSurface(normal, dir);
                     e.quaternion.slerp(q, smoothFactor(0.1, dt));
+                } else {
+                    e.userData._isMoving = false;
                 }
             } else {
                 // Wander on sphere surface
@@ -199,6 +269,9 @@ export default class EntityAISystem {
                 if (e.userData.wanderDir && planet) {
                     const newPos = SphericalUtils.moveOnSurface(e.position, e.userData.wanderDir, e.userData.moveSpeed * 0.5, planet);
                     e.position.copy(newPos);
+                    e.userData._isMoving = true;
+                } else {
+                    e.userData._isMoving = false;
                 }
             }
         }

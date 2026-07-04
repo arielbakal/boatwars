@@ -550,7 +550,13 @@ export default class EntityFactory {
         }
         body.position.y = 0.15;
         body.scale.set(scale, scale, scale);
-        g.add(body);
+        // Body + eyes share a local animation pivot so per-species locomotion FX
+        // (squash-stretch, waddle, lean) move them together instead of desyncing
+        // the eyes (siblings, not children of body) from the body they sit on —
+        // see EntityAISystem._animateCreatureLocomotion.
+        const animPivot = new THREE.Group();
+        animPivot.add(body);
+        g.add(animPivot);
         const baseEyeR = 0.045 * scale * (dna.eyeScale || 1.0);
         const eyeGeo = new THREE.SphereGeometry(baseEyeR, 4, 4);
         const pupGeo = new THREE.SphereGeometry(baseEyeR * 0.4, 4, 4);
@@ -569,27 +575,27 @@ export default class EntityFactory {
         };
         if (bodyShape === 'box') {
             const sideX = 0.19, eyeY = 0.22, eyeZ = 0.15, rot = 0;
-            if (dna.eyeCount === 1) g.add(addEye(0, eyeY, 0.22, rot));
-            else if (dna.eyeCount === 2) { g.add(addEye(sideX, eyeY, eyeZ, rot)); g.add(addEye(-sideX, eyeY, eyeZ, rot)); }
-            else { g.add(addEye(sideX, eyeY, eyeZ, rot)); g.add(addEye(-sideX, eyeY, eyeZ, rot)); g.add(addEye(0, eyeY + 0.08, 0.22, 0)); }
+            if (dna.eyeCount === 1) animPivot.add(addEye(0, eyeY, 0.22, rot));
+            else if (dna.eyeCount === 2) { animPivot.add(addEye(sideX, eyeY, eyeZ, rot)); animPivot.add(addEye(-sideX, eyeY, eyeZ, rot)); }
+            else { animPivot.add(addEye(sideX, eyeY, eyeZ, rot)); animPivot.add(addEye(-sideX, eyeY, eyeZ, rot)); animPivot.add(addEye(0, eyeY + 0.08, 0.22, 0)); }
         } else if (bodyShape === 'cone') {
             const sideX = 0.12, eyeY = 0.28, eyeZ = 0.18, rot = 0;
-            if (dna.eyeCount === 1) g.add(addEye(0, eyeY, eyeZ, rot));
-            else if (dna.eyeCount === 2) { g.add(addEye(sideX, eyeY, eyeZ, rot)); g.add(addEye(-sideX, eyeY, eyeZ, rot)); }
-            else { g.add(addEye(sideX, eyeY, eyeZ, rot)); g.add(addEye(-sideX, eyeY, eyeZ, rot)); g.add(addEye(0, eyeY + 0.06, 0.22, 0)); }
+            if (dna.eyeCount === 1) animPivot.add(addEye(0, eyeY, eyeZ, rot));
+            else if (dna.eyeCount === 2) { animPivot.add(addEye(sideX, eyeY, eyeZ, rot)); animPivot.add(addEye(-sideX, eyeY, eyeZ, rot)); }
+            else { animPivot.add(addEye(sideX, eyeY, eyeZ, rot)); animPivot.add(addEye(-sideX, eyeY, eyeZ, rot)); animPivot.add(addEye(0, eyeY + 0.06, 0.22, 0)); }
         } else {
             const isFrontEyes = Math.random() < 0.5;
             const eyeY = 0.22;
             if (isFrontEyes) {
                 const eyeZ = 0.18;
-                if (dna.eyeCount === 1) g.add(addEye(0, eyeY, eyeZ, 0));
-                else if (dna.eyeCount === 2) { g.add(addEye(0.08, eyeY, eyeZ, 0.2)); g.add(addEye(-0.08, eyeY, eyeZ, -0.2)); }
-                else { g.add(addEye(0, eyeY + 0.05, eyeZ, 0)); g.add(addEye(0.1, eyeY - 0.02, eyeZ - 0.02, 0.25)); g.add(addEye(-0.1, eyeY - 0.02, eyeZ - 0.02, -0.25)); }
+                if (dna.eyeCount === 1) animPivot.add(addEye(0, eyeY, eyeZ, 0));
+                else if (dna.eyeCount === 2) { animPivot.add(addEye(0.08, eyeY, eyeZ, 0.2)); animPivot.add(addEye(-0.08, eyeY, eyeZ, -0.2)); }
+                else { animPivot.add(addEye(0, eyeY + 0.05, eyeZ, 0)); animPivot.add(addEye(0.1, eyeY - 0.02, eyeZ - 0.02, 0.25)); animPivot.add(addEye(-0.1, eyeY - 0.02, eyeZ - 0.02, -0.25)); }
             } else {
                 const eyeX = 0.15, eyeZ = 0.12, rot = 0.3;
-                if (dna.eyeCount === 1) g.add(addEye(0, eyeY, 0.35, 0));
-                else if (dna.eyeCount === 2) { g.add(addEye(eyeX, eyeY, eyeZ, rot)); g.add(addEye(-eyeX, eyeY, eyeZ, -rot)); }
-                else { g.add(addEye(eyeX, eyeY, eyeZ, rot)); g.add(addEye(-eyeX, eyeY, eyeZ, -rot)); g.add(addEye(0, eyeY + 0.1, 0.25, 0)); }
+                if (dna.eyeCount === 1) animPivot.add(addEye(0, eyeY, 0.35, 0));
+                else if (dna.eyeCount === 2) { animPivot.add(addEye(eyeX, eyeY, eyeZ, rot)); animPivot.add(addEye(-eyeX, eyeY, eyeZ, -rot)); }
+                else { animPivot.add(addEye(eyeX, eyeY, eyeZ, rot)); animPivot.add(addEye(-eyeX, eyeY, eyeZ, -rot)); animPivot.add(addEye(0, eyeY + 0.1, 0.25, 0)); }
             }
         }
         g.position.set(x, 0, z);
@@ -602,7 +608,9 @@ export default class EntityFactory {
             hp: 6, aggroTimer: 0, contactCooldown: 0,
             // A1: per-species temperament drives ambient aggro chance (static lookup, no RNG)
             temperament: dna.temperament !== undefined ? dna.temperament : 1.0,
-            heightOffset: 0.3
+            heightOffset: 0.3,
+            // Body+eyes sub-pivot for per-species locomotion animation (see EntityAISystem)
+            bodyMesh: body, animPivot: animPivot, _isMoving: false
         };
         return g;
     }

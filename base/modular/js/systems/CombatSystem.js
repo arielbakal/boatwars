@@ -351,6 +351,9 @@ export default class CombatSystem {
                 } else {
                     e.position.add(dir.multiplyScalar(speed));
                 }
+                e.userData._isMoving = true;
+            } else {
+                e.userData._isMoving = false;
             }
         }
     }
