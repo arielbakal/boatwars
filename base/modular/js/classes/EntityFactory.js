@@ -30,11 +30,16 @@ export default class EntityFactory {
         const floraHue = (hue + 0.2 + Math.random() * 0.4) % 1;
         const flora = new THREE.Color().setHSL(floraHue, 0.5 + Math.random() * 0.4, 0.3 + Math.random() * 0.3);
         const groundTop = flora.clone().multiplyScalar(0.75);
+        // Grass gets its own hue derived from flora (shifted warmer, slightly
+        // different sat/light) so ground cover reads as a distinct material
+        // from tree canopy instead of aliasing to the same color.
+        const grassHue = (floraHue + 0.06 + Math.random() * 0.04) % 1;
+        const tallGrass = new THREE.Color().setHSL(grassHue, 0.55 + Math.random() * 0.35, 0.32 + Math.random() * 0.28);
         const creatureHue = (floraHue + 0.5) % 1;
         const creature = new THREE.Color().setHSL(creatureHue, 0.8, 0.6);
         const accent = new THREE.Color().setHSL((creatureHue + 0.2) % 1, 0.9, 0.6);
         const background = new THREE.Color().setHSL((hue + 0.5) % 1, 0.3, 0.8);
-        return { background, baseRock: baseDark, trunk: baseDark, soil, groundTop, flora, tallGrass: flora, creature, accent };
+        return { background, baseRock: baseDark, trunk: baseDark, soil, groundTop, flora, tallGrass, creature, accent };
     }
 
     generateWorldDNA() {
@@ -197,6 +202,42 @@ export default class EntityFactory {
         }
         posAttribute.needsUpdate = true;
         merged.computeVertexNormals();
+        return merged;
+    }
+
+    /**
+     * Merge several transformed box geometries into a single non-indexed
+     * BufferGeometry (position + normal only — no UVs needed, everything
+     * here uses flat-color toon materials). r128 ships no
+     * BufferGeometryUtils, so this is hand-rolled: each source box is
+     * expanded to non-indexed (one vertex per triangle corner, so no index
+     * offsetting is needed when concatenating), transformed via
+     * BufferGeometry.applyMatrix4 (which also rotates normals through the
+     * normal matrix — correct even with the rotations used for blade lean),
+     * then the position/normal arrays are copied back-to-back into one
+     * buffer. One merged geometry = one draw call for the whole clump.
+     * @param {Array<{geometry: THREE.BufferGeometry, matrix: THREE.Matrix4}>} parts
+     */
+    mergeBoxGeometries(parts) {
+        const expanded = parts.map(({ geometry, matrix }) => {
+            const g = geometry.toNonIndexed();
+            g.applyMatrix4(matrix);
+            return g;
+        });
+        let vertCount = 0;
+        for (const g of expanded) vertCount += g.attributes.position.count;
+        const positions = new Float32Array(vertCount * 3);
+        const normals = new Float32Array(vertCount * 3);
+        let offset = 0;
+        for (const g of expanded) {
+            positions.set(g.attributes.position.array, offset * 3);
+            normals.set(g.attributes.normal.array, offset * 3);
+            offset += g.attributes.position.count;
+            g.dispose();
+        }
+        const merged = new THREE.BufferGeometry();
+        merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        merged.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
         return merged;
     }
 
@@ -506,8 +547,34 @@ export default class EntityFactory {
         const g = new THREE.Group();
         const h = (style ? style.height : this.state.worldDNA.grass.height);
         const dna = style || { color: p.tallGrass.clone(), height: h };
-        const m = new THREE.Mesh(new THREE.BoxGeometry(0.07, dna.height, 0.07), this.getMat(dna.color));
-        m.position.y = dna.height / 2;
+
+        // Clump of 3-5 blades (varied height/lean) merged into ONE
+        // BufferGeometry via mergeBoxGeometries — still a single draw call,
+        // same cost as the old lone blade, but reads as a tuft instead of a stick.
+        const bladeCount = 3 + Math.floor(Math.random() * 3); // 3-5
+        const parts = [];
+        for (let i = 0; i < bladeCount; i++) {
+            const bladeH = dna.height * (0.5 + Math.random() * 0.8); // 0.5x-1.3x base height
+            const bladeGeo = new THREE.BoxGeometry(0.06, bladeH, 0.06);
+            const spreadAngle = Math.random() * Math.PI * 2;
+            const spreadDist = Math.random() * 0.12;
+            const px = Math.cos(spreadAngle) * spreadDist;
+            const pz = Math.sin(spreadAngle) * spreadDist;
+            const leanAngle = Math.random() * 0.35; // tilt magnitude
+            const leanDir = Math.random() * Math.PI * 2; // tilt direction
+            const quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(leanAngle, leanDir, 0, 'YXZ'));
+            // base: lift the box so its bottom face sits at local y=0 (hinge point).
+            // rot: tilt/spin about that hinge (order matters — rotate before moving).
+            // trans: place the hinged blade at its offset within the clump footprint.
+            const base = new THREE.Matrix4().makeTranslation(0, bladeH / 2, 0);
+            const rot = new THREE.Matrix4().makeRotationFromQuaternion(quat);
+            const trans = new THREE.Matrix4().makeTranslation(px, 0, pz);
+            const matrix = new THREE.Matrix4().multiplyMatrices(trans, rot).multiply(base);
+            parts.push({ geometry: bladeGeo, matrix });
+        }
+        const clumpGeo = this.mergeBoxGeometries(parts);
+        parts.forEach(part => part.geometry.dispose());
+        const m = new THREE.Mesh(clumpGeo, this.getMat(dna.color));
         g.add(m);
         g.position.set(x, 0, z);
         g.scale.set(0, 0, 0);
