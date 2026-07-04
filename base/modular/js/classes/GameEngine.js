@@ -234,6 +234,13 @@ export default class GameEngine {
         // would keep lerping the player toward it forever with no way to reach it.
         this.state.isBoardingBoat = false;
         this.state.boardingTargetBoat = null;
+        // Clicks landing inside the reset window could otherwise leave chop/mine
+        // state armed against an entity from the wiped world.
+        this.state.isChopping = false;
+        this.state.isMining = false;
+        this.state.chopTimer = 0;
+        this.state.mineTimer = 0;
+        this.state.interactionTarget = null;
         // Reset hygiene: a shake mid-decay or damage numbers still mid-flight would
         // otherwise carry over into the new world — the latter would also leak
         // their sprite textures/materials since nothing else ever disposes them.
@@ -241,7 +248,16 @@ export default class GameEngine {
         this.particleSystem.clearDamageNumbers(this.world, this.state);
         this.playerController.remove();
         this.audio.fadeOut();
-        setTimeout(() => this.initGame(null), 800);
+        setTimeout(() => {
+            try {
+                this.initGame(null);
+            } finally {
+                // initGame's tail clears this flag on success; the finally covers a
+                // mid-generation throw, which would otherwise leave it stuck true and
+                // freeze every player-model system in animate() permanently.
+                this.state.isResettingWorld = false;
+            }
+        }, 800);
     }
 
     /**

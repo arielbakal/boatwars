@@ -13,7 +13,7 @@ export default class ParticleSystem {
      * that loop and GameEngine.resetWorld's full-clear so there's one disposal
      * code path instead of two copies that can drift apart.
      */
-    disposeDamageNumber(world, n) {
+    static disposeDamageNumber(world, n) {
         world.remove(n);
         if (n.material.map) n.material.map.dispose();
         n.material.dispose();
@@ -23,7 +23,7 @@ export default class ParticleSystem {
      * reset doesn't leak sprite textures/materials for numbers still mid-flight. */
     clearDamageNumbers(world, state) {
         for (const n of state.damageNumbers) {
-            this.disposeDamageNumber(world, n);
+            ParticleSystem.disposeDamageNumber(world, n);
         }
         state.damageNumbers.length = 0;
     }
@@ -42,9 +42,11 @@ export default class ParticleSystem {
             const p = state.particles[i];
             p.position.addScaledVector(p.userData.vel, dt * 60); // C6: dt-normalized position integration (tuned at 60 FPS)
 
-            // Gravity toward nearest planet
+            // Gravity toward nearest planet. findNearestPlanet returns bare null
+            // while state.islands is empty (the 800ms world-reset window) — and
+            // particles keep animating through that window by design.
             const result = SphericalUtils.findNearestPlanet(p.position, state.islands);
-            if (result.planet) {
+            if (result && result.planet) {
                 const normal = SphericalUtils.getSurfaceNormal(p.position, result.planet);
                 // Pull toward planet center (opposite of normal)
                 const gravity = 0.002 * (dt * 60); // C6: dt-normalized gravity accumulation (tuned at 60 FPS)
@@ -67,9 +69,9 @@ export default class ParticleSystem {
             if (d.userData.vel) {
                 d.position.addScaledVector(d.userData.vel, dt * 60); // C6: dt-normalized position integration (tuned at 60 FPS)
 
-                // Gravity toward nearest planet
+                // Gravity toward nearest planet (null while islands is empty — see above)
                 const result = SphericalUtils.findNearestPlanet(d.position, state.islands);
-                if (result.planet) {
+                if (result && result.planet) {
                     const normal = SphericalUtils.getSurfaceNormal(d.position, result.planet);
                     const gravity = 0.01 * (dt * 60); // C6: dt-normalized gravity accumulation (tuned at 60 FPS)
                     d.userData.vel.x -= normal.x * gravity;
@@ -107,7 +109,7 @@ export default class ParticleSystem {
                 // instances share one static quad geometry across the whole scene
                 // (particles, speech bubbles, ...); disposing it here would break
                 // every other sprite currently in the scene, not just this one.
-                this.disposeDamageNumber(world, n);
+                ParticleSystem.disposeDamageNumber(world, n);
                 state.damageNumbers.splice(i, 1);
             }
         }
