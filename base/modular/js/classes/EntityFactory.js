@@ -840,8 +840,8 @@ export default class EntityFactory {
 
     createPickaxe(palette, x, z) {
         const g = new THREE.Group();
-        const woodMaterial = new THREE.MeshStandardMaterial({ color: 0x5d4037, flatShading: true });
-        const metalMaterial = new THREE.MeshStandardMaterial({ color: 0x555555, flatShading: true });
+        const woodMaterial = new THREE.MeshToonMaterial({ color: 0x5d4037, flatShading: true });
+        const metalMaterial = new THREE.MeshToonMaterial({ color: 0x555555, flatShading: true });
 
         const handleGeo = new THREE.CylinderGeometry(0.0125, 0.015, 0.5, 6);
         const handle = new THREE.Mesh(handleGeo, woodMaterial);
@@ -870,9 +870,9 @@ export default class EntityFactory {
 
     createAxe(palette, x, z) {
         const g = new THREE.Group();
-        const woodMaterial = new THREE.MeshStandardMaterial({ color: 0x5d4037, flatShading: true });
-        const metalMaterial = new THREE.MeshStandardMaterial({ color: 0x78909c, flatShading: true });
-        const edgeMaterial = new THREE.MeshStandardMaterial({ color: 0xeeeeee, flatShading: true });
+        const woodMaterial = new THREE.MeshToonMaterial({ color: 0x5d4037, flatShading: true });
+        const metalMaterial = new THREE.MeshToonMaterial({ color: 0x78909c, flatShading: true });
+        const edgeMaterial = new THREE.MeshToonMaterial({ color: 0xeeeeee, flatShading: true });
 
         const handleGeo = new THREE.CylinderGeometry(0.0125, 0.015, 0.5, 6);
         const handle = new THREE.Mesh(handleGeo, woodMaterial);
@@ -911,7 +911,7 @@ export default class EntityFactory {
         const color = new THREE.Color(colorMap[boostData.stat] || 0xffffff);
 
         const crystalGeo = new THREE.OctahedronGeometry(0.15, 0);
-        const crystalMat = new THREE.MeshStandardMaterial({
+        const crystalMat = new THREE.MeshToonMaterial({
             color: color,
             emissive: color,
             emissiveIntensity: 0.6,
@@ -963,7 +963,7 @@ export default class EntityFactory {
 
         // Cockpit dome
         const cockpitGeo = new THREE.SphereGeometry(0.5, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
-        const cockpitMat = new THREE.MeshPhongMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5, flatShading: true });
+        const cockpitMat = new THREE.MeshToonMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5, flatShading: true });
         const cockpit = new THREE.Mesh(cockpitGeo, cockpitMat);
         cockpit.position.set(0, 0.5, -0.8);
         hullPivot.add(cockpit);
