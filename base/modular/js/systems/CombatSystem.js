@@ -14,6 +14,7 @@ import {
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
 import { smoothFactor } from '../classes/Easing.js';
+import ParticleSystem from './ParticleSystem.js';
 
 export default class CombatSystem {
     constructor(ui) {
@@ -210,9 +211,7 @@ export default class CombatSystem {
         state.damageNumbers.push(num);
         if (state.damageNumbers.length > 20) {
             const oldest = state.damageNumbers.shift();
-            world.remove(oldest);
-            if (oldest.material.map) oldest.material.map.dispose();
-            oldest.material.dispose();
+            ParticleSystem.disposeDamageNumber(world, oldest);
         }
     }
 
@@ -220,7 +219,16 @@ export default class CombatSystem {
         const originalEmissives = [];
         entity.traverse(child => {
             if (child.material && child.material.emissive) {
-                originalEmissives.push({ mat: child.material, orig: child.material.emissive.getHex() });
+                // Restore target must be the material's TRUE base emissive: prefer an
+                // in-flight flash's saved base, then the highlight system's saved base
+                // (InputHandler.setHighlight), then the live value. Capturing the live
+                // hex blindly would bake an active highlight/flash tint into the
+                // restore and leave the entity stuck tinted after both effects end.
+                const trueOrig = child.userData._flashOrig !== undefined ? child.userData._flashOrig
+                    : child.userData._origEmissive !== undefined ? child.userData._origEmissive
+                    : child.material.emissive.getHex();
+                child.userData._flashOrig = trueOrig;
+                originalEmissives.push({ child, mat: child.material, orig: trueOrig });
                 child.material.emissive.setHex(color);
             }
         });
@@ -231,8 +239,9 @@ export default class CombatSystem {
         for (let i = this._flashTimers.length - 1; i >= 0; i--) {
             this._flashTimers[i].timer -= dt;
             if (this._flashTimers[i].timer <= 0) {
-                for (const { mat, orig } of this._flashTimers[i].originals) {
+                for (const { child, mat, orig } of this._flashTimers[i].originals) {
                     mat.emissive.setHex(orig);
+                    delete child.userData._flashOrig;
                 }
                 this._flashTimers.splice(i, 1);
             }

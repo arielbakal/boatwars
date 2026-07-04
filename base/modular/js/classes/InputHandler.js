@@ -758,7 +758,12 @@ export default class InputHandler {
             if (child.material && child.material.emissive) {
                 if (on) {
                     if (child.userData._origEmissive === undefined) {
-                        child.userData._origEmissive = child.material.emissive.getHex();
+                        // If a combat flash is live on this material, its saved base is
+                        // the truth — the live hex is the flash color, and saving that
+                        // would restore the flash tint permanently on unhighlight.
+                        child.userData._origEmissive = child.userData._flashOrig !== undefined
+                            ? child.userData._flashOrig
+                            : child.material.emissive.getHex();
                     }
                     child.material.emissive.setHex(0x222222);
                 } else {
