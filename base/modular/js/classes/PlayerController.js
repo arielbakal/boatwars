@@ -34,6 +34,7 @@ export default class PlayerController {
         this.armR = null;
         this.time = 0;
         this._isMoving = false; // last-frame movement state, read by updateCamera()'s FOV kick
+        this._walkPhase = 0; // dedicated walk-cycle phase accumulator (speed-scaled, see update())
         this.chopAnimState = null;
         this._lookTarget = null; // C8: smoothed camera look target
 
@@ -428,6 +429,9 @@ export default class PlayerController {
             const lurcht = Math.max(0, Math.sin(swingT * Math.PI));
             this.modelPivot.position.z = lurcht * 0.08;
             this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, smoothFactor(0.1, dt));
+            // Relax any aerial torso lean — a swing always wins over the aerial pose,
+            // so a mid-air attack (including the always-visible FP arm) reads cleanly.
+            this.torso.rotation.x = THREE.MathUtils.lerp(this.torso.rotation.x, 0, smoothFactor(0.15, dt));
         } else if (this.chopAnimState) {
             const { isSwinging, swingProgress } = this.chopAnimState;
             if (isSwinging) {
@@ -445,14 +449,43 @@ export default class PlayerController {
             this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, smoothFactor(0.1, dt));
             this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, smoothFactor(0.1, dt));
             this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, smoothFactor(0.1, dt));
+            // Relax any aerial torso lean — the chop swing wins over the aerial pose.
+            this.torso.rotation.x = THREE.MathUtils.lerp(this.torso.rotation.x, 0, smoothFactor(0.15, dt));
         } else if (isMoving && player.onGround) {
-            const walkCycle = this.time * 10;
+            // Speed-matched walk cycle: advance a dedicated phase accumulator — NOT a
+            // retroactively scaled this.time, which would make the pose jump whenever
+            // the ratio changes mid-run — by effective speed (base + speed essence)
+            // over base speed. Speed-boosted feet now actually step faster instead of
+            // sliding across the ground at the old fixed cadence.
+            const speedRatio = player.speed > 0
+                ? (player.speed + (player.speedBoost || 0)) / player.speed
+                : 1;
+            this._walkPhase += dt * 10 * speedRatio;
+            const walkCycle = this._walkPhase;
             this.legL.rotation.x = Math.sin(walkCycle) * 0.8;
             this.legR.rotation.x = Math.sin(walkCycle + Math.PI) * 0.8;
             this.armL.rotation.x = Math.sin(walkCycle + Math.PI) * 0.5;
             this.armR.rotation.x = Math.sin(walkCycle) * 0.5;
             this.modelPivot.position.y = Math.abs(Math.sin(walkCycle * 2)) * 0.05;
             this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, smoothFactor(0.1, dt));
+            // Relax any aerial torso lean picked up from a jump that just landed.
+            this.torso.rotation.x = THREE.MathUtils.lerp(this.torso.rotation.x, 0, smoothFactor(0.15, dt));
+        } else if (!player.onGround) {
+            // Aerial pose (jump/fall): legs tucked back (rear leg more), arms slightly
+            // raised, small forward torso lean — instead of falling through to the idle
+            // rest pose. smoothFactor(0.15, dt) eases it in on takeoff; landing recovers
+            // just as smoothly because onGround flipping back routes into the walk/idle
+            // branches, whose own smoothed lerps pull these joints back to rest.
+            // isAttacking/chopAnimState are checked earlier in this chain, so a swing
+            // in progress always wins — including the always-visible FP right arm.
+            const af = smoothFactor(0.15, dt);
+            this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0.3, af);
+            this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0.6, af); // rear leg tucks back more
+            this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, -0.3, af);
+            this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, -0.3, af);
+            this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, af);
+            this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, af);
+            this.torso.rotation.x = THREE.MathUtils.lerp(this.torso.rotation.x, 0.12, af); // small forward lean
         } else {
             const lerp = smoothFactor(0.1, dt);
             this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, lerp);
@@ -461,6 +494,8 @@ export default class PlayerController {
             this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, 0, lerp);
             this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, lerp);
             this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, lerp);
+            // Relax any aerial torso lean picked up from a jump that just landed.
+            this.torso.rotation.x = THREE.MathUtils.lerp(this.torso.rotation.x, 0, lerp);
         }
     }
 
