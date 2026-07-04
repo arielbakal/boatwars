@@ -12,6 +12,13 @@ export default class WorldManager {
         this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
         this.renderer.setSize(window.innerWidth * renderScale, window.innerHeight * renderScale, false);
         this.renderer.domElement.style.imageRendering = 'pixelated';
+        // r128 API — filmic tone mapping + sRGB output for correct color response
+        // against the hand-rolled HSL palettes (shifts global brightness/saturation
+        // slightly; acceptable). NOTE: r152+ renames `outputEncoding` (THREE.sRGBEncoding)
+        // to `outputColorSpace` (THREE.SRGBColorSpace) — update both lines together
+        // on any future Three.js upgrade past r151.
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this.renderer.outputEncoding = THREE.sRGBEncoding;
         document.body.appendChild(this.renderer.domElement);
         this.scene.background = new THREE.Color(0x020208);
         // Navigation-safe space fog: far (700) comfortably exceeds the farthest
