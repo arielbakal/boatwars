@@ -492,13 +492,56 @@ export default class EntityFactory {
         };
         const trunk = new THREE.Mesh(new THREE.CylinderGeometry(dna.thickness * 0.7, dna.thickness, dna.height, 5), this.getMat(dna.trunkColor));
         trunk.position.y = dna.height / 2;
-        let leafGeo = dna.shape === 'cone' ? new THREE.ConeGeometry(1.0, 1.8, 5) :
-            dna.shape === 'box' ? new THREE.BoxGeometry(1.2, 1.2, 1.2) :
-                dna.shape === 'cylinder' ? new THREE.CylinderGeometry(0.8, 0.8, 1.0, 6) : new THREE.DodecahedronGeometry(0.9);
-        const leaves = new THREE.Mesh(leafGeo, this.getMat(dna.color));
-        leaves.position.y = dna.height;
-        if (dna.shape === 'cone') leaves.position.y += 0.2;
-        g.add(trunk, leaves);
+        g.add(trunk);
+
+        // Layered canopy (2-3 volumes) instead of one lone primitive —
+        // silhouette upgrade keyed off worldDNA.tree.shape. Each layer gets
+        // a slight per-layer lightness jitter so the stack reads as depth
+        // instead of one flat-colored blob. Bounded to 2-3 meshes/tree
+        // (~51 trees total across all planets, so draw-call cost stays low).
+        const layerColor = (i) => dna.color.clone().offsetHSL(0, 0, (Math.random() - 0.5) * 0.08 - i * 0.02);
+        if (dna.shape === 'cone') {
+            // Stacked decreasing cones = pine silhouette
+            const layerCount = 2 + Math.floor(Math.random() * 2); // 2-3
+            let y = dna.height;
+            for (let i = 0; i < layerCount; i++) {
+                const shrink = 1 - i * 0.25;
+                const coneH = 1.5 * shrink;
+                const cone = new THREE.Mesh(new THREE.ConeGeometry(1.0 * shrink, coneH, 5), this.getMat(layerColor(i)));
+                cone.position.y = y + coneH * 0.5;
+                g.add(cone);
+                y += coneH * 0.55; // overlap so the stack reads continuous
+            }
+        } else if (dna.shape === 'cylinder') {
+            // Layered discs (pagoda-style stack)
+            const layerCount = 2 + Math.floor(Math.random() * 2); // 2-3
+            let y = dna.height;
+            for (let i = 0; i < layerCount; i++) {
+                const shrink = 1 - i * 0.2;
+                const radius = 0.85 * shrink;
+                const discH = 0.4;
+                const disc = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 1.1, discH, 6), this.getMat(layerColor(i)));
+                disc.position.y = y + discH * 0.5;
+                g.add(disc);
+                y += discH + 0.15; // small gap between discs
+            }
+        } else {
+            // box / round (dodeca): offset overlapping volumes = clumped canopy
+            const layerCount = 2 + Math.floor(Math.random() * 2); // 2-3
+            for (let i = 0; i < layerCount; i++) {
+                const layerScale = 1 - i * 0.2 + Math.random() * 0.1;
+                const volGeo = dna.shape === 'box' ? new THREE.BoxGeometry(1.2, 1.2, 1.2) : new THREE.DodecahedronGeometry(0.9);
+                const vol = new THREE.Mesh(volGeo, this.getMat(layerColor(i)));
+                vol.scale.setScalar(layerScale);
+                vol.position.set(
+                    (Math.random() - 0.5) * 0.5,
+                    dna.height + (Math.random() - 0.5) * 0.3,
+                    (Math.random() - 0.5) * 0.5
+                );
+                g.add(vol);
+            }
+        }
+
         g.position.set(x, 0, z);
         g.rotation.y = Math.random() * Math.PI * 2;
         g.scale.set(0, 0, 0);
