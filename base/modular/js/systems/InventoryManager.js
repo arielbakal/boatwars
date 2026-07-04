@@ -8,6 +8,7 @@ import {
     PICKUP_RANGE,
     CRAFT_HINT_DURATION
 } from '../constants.js';
+import { smoothFactor } from '../classes/Easing.js';
 
 export default class InventoryManager {
     constructor(state, audio, ui) {
@@ -74,43 +75,89 @@ export default class InventoryManager {
     }
 
     /**
-     * Auto-pickup system - collect nearby items (logs, axes, pickaxes).
+     * Auto-pickup system - collect nearby items (logs, rocks, gold, ...).
      * Called each frame by the system manager.
+     *
+     * Pickup magnetism: entering PICKUP_RANGE no longer instantly collects an item —
+     * it's marked magnetized and glides toward the player's chest each frame
+     * (smoothFactor-eased), collecting via the existing per-type path once close
+     * enough. If the inventory has no room for the item, it's left resting instead
+     * of magnetizing (re-checked next frame) so a full inventory can't suck in an
+     * item it then can't collect.
      */
     update(dt, context) {
-        const { state, world, audio, factory } = context;
+        const { state, world, audio, factory, playerController } = context;
         const playerPos = state.player.pos;
 
         if (state.isOnBoat || state.isBoardingBoat) return;
 
+        const up = (playerController && playerController.getSurfaceNormal)
+            ? playerController.getSurfaceNormal()
+            : new THREE.Vector3(0, 1, 0);
+
         for (let i = state.entities.length - 1; i >= 0; i--) {
             const e = state.entities[i];
             if (!e.userData.autoPickup) continue;
+
+            if (e.userData._magnetized) {
+                const target = playerPos.clone().addScaledVector(up, 0.5); // player's chest
+                e.position.lerp(target, smoothFactor(0.25, dt));
+                if (e.position.distanceTo(target) < 0.6) {
+                    this._collectAutoPickup(e, i, context);
+                }
+                continue;
+            }
+
             const dist = e.position.distanceTo(playerPos);
             if (dist < PICKUP_RANGE && e.scale.x > 0.5) {
-                if (e.userData.type === 'log') {
-                    const added = this.addToInventory('wood', e.userData.color, null);
-                    if (added) {
-                        audio.pickup();
-                        for (let j = 0; j < 8; j++) factory.createParticle(e.position.clone(), e.userData.color, 0.8);
-                        world.remove(e);
-                        state.entities.splice(i, 1);
-                    }
+                const pickupType = e.userData.type === 'log' ? 'wood' : e.userData.type;
+                if (this._canPickup(pickupType, e.userData.color)) {
+                    e.userData._magnetized = true;
                 }
-                if (e.userData.type === 'rock' || e.userData.type === 'gold') {
-                    const added = this.addToInventory(e.userData.type, e.userData.color, null);
-                    if (added) {
-                        audio.pickup();
-                        for (let j = 0; j < 8; j++) factory.createParticle(e.position.clone(), e.userData.color, 0.8);
-                        world.remove(e);
-                        state.entities.splice(i, 1);
-                    }
-                }
+                // else: no room — leave it resting, re-evaluated next frame
             }
         }
 
         this._updateWoodHUD(state);
         this._updateCraftHint(dt, state);
+    }
+
+    /** Mirrors addToInventory's feasibility check without mutating state. */
+    _canPickup(type, color) {
+        const isStackable = NON_STACKABLE_TYPES.indexOf(type) === -1;
+        if (isStackable) {
+            const existingIdx = this.state.inventory.findIndex(item =>
+                item && item.type === type && item.color.getHex() === color.getHex()
+            );
+            if (existingIdx !== -1) return true;
+        }
+        return this.state.inventory.some(item => item === null);
+    }
+
+    /** Collects a magnetized item that has reached the player's chest. */
+    _collectAutoPickup(e, idx, context) {
+        const { state, world, audio, factory } = context;
+        if (e.userData.type === 'log') {
+            const added = this.addToInventory('wood', e.userData.color, null);
+            if (added) {
+                audio.pickup();
+                for (let j = 0; j < 8; j++) factory.createParticle(e.position.clone(), e.userData.color, 0.8);
+                world.remove(e);
+                state.entities.splice(idx, 1);
+            }
+        } else if (e.userData.type === 'rock' || e.userData.type === 'gold') {
+            const added = this.addToInventory(e.userData.type, e.userData.color, null);
+            if (added) {
+                audio.pickup();
+                for (let j = 0; j < 8; j++) factory.createParticle(e.position.clone(), e.userData.color, 0.8);
+                world.remove(e);
+                state.entities.splice(idx, 1);
+            }
+        } else {
+            // Unrecognized autoPickup type with no collect path — un-magnetize so it
+            // doesn't chase the player forever without ever being collected.
+            e.userData._magnetized = false;
+        }
     }
 
     /** Wires the resource HUD (#log-count) to the live wood count in inventory. */

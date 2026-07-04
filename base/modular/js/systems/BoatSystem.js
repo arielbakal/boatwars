@@ -120,6 +120,22 @@ export default class BoatSystem {
             playerController.playerGroup.visible = true;
             this.setSeatedPose(playerController);
         }
+
+        this._cacheEngineGlows(boat);
+    }
+
+    /**
+     * Traverse the boat for userData.isEngineGlow meshes (tagged in
+     * EntityFactory.createSpaceship) and cache them on the boat for
+     * _updateEngineGlow to pulse each frame while piloting — avoids a full
+     * traverse() every frame just to find them.
+     */
+    _cacheEngineGlows(boat) {
+        const glows = [];
+        boat.traverse(child => {
+            if (child.userData && child.userData.isEngineGlow) glows.push(child);
+        });
+        boat.userData._engineGlowMeshes = glows;
     }
 
     disembarkBoat(context) {
@@ -639,6 +655,36 @@ export default class BoatSystem {
 
         // --- Thruster particles ---
         this._emitThrusterParticles(state, boat, factory, q);
+
+        // --- Engine glow throttle response ---
+        this._updateEngineGlow(boat, stats);
+    }
+
+    // ===========================================
+    // ENGINE GLOW (throttle response)
+    // ===========================================
+
+    /**
+     * Pulse the cached engine-glow meshes (see _cacheEngineGlows) with throttle:
+     * opacity 0.35 -> 0.9 and scale 1 -> 1.25 as |currentSpeed| approaches the
+     * (possibly damage-degraded) effective max speed, plus a subtle flicker.
+     * Materials are MeshBasicMaterial({ transparent: true }) — safe to drive opacity.
+     */
+    _updateEngineGlow(boat, stats) {
+        const glows = boat.userData._engineGlowMeshes;
+        if (!glows || !glows.length) return;
+
+        const effMax = this._getEffectiveMaxSpeed(stats);
+        const speedRatio = effMax > 0 ? Math.min(1, Math.abs(stats.currentSpeed) / effMax) : 0;
+        const flicker = 1 + (Math.random() - 0.5) * 0.08; // subtle +/-4%
+
+        const opacity = THREE.MathUtils.clamp((0.35 + speedRatio * 0.55) * flicker, 0.2, 1.0);
+        const scale = (1 + speedRatio * 0.25) * flicker;
+
+        for (const glow of glows) {
+            if (glow.material) glow.material.opacity = opacity;
+            glow.scale.setScalar(scale);
+        }
     }
 
     // ===========================================
