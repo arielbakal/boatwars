@@ -25,13 +25,13 @@ import NetworkManager from '../network/NetworkManager.js';
 import RemotePlayerManager from '../network/RemotePlayerManager.js';
 import SeededRandom from '../network/SeededRandom.js';
 
-import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV } from '../constants.js';
+import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV, RENDER_SCALE } from '../constants.js';
 
 export default class GameEngine {
     constructor() {
         this.audio = new AudioManager();
         this.state = new GameState();
-        this.world = new WorldManager(0.5);
+        this.world = new WorldManager(RENDER_SCALE);
         this.factory = new EntityFactory(this.world, this.state);
         this.playerController = new PlayerController(this.world, this.state);
         this.spheres = [];

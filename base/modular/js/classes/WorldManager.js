@@ -2,7 +2,7 @@
 // WORLD MANAGER - Space Environment
 // =====================================================
 
-import { STAR_COUNT, STAR_SPREAD } from '../constants.js';
+import { STAR_COUNT, STAR_SPREAD, SPACE_FOG_COLOR } from '../constants.js';
 
 export default class WorldManager {
     constructor(renderScale) {
@@ -14,6 +14,15 @@ export default class WorldManager {
         this.renderer.domElement.style.imageRendering = 'pixelated';
         document.body.appendChild(this.renderer.domElement);
         this.scene.background = new THREE.Color(0x020208);
+        // Navigation-safe space fog: far (700) comfortably exceeds the farthest
+        // planet's edge (~171 units from origin, planet 3) plus travel margin, so
+        // it only ever fades far-away emptiness, never a planet you're approaching.
+        // SPACE_FOG_COLOR matches scene.background above so fogged-out geometry
+        // blends into the sky instead of showing a seam. Stars sit at
+        // STAR_SPREAD (800-1000) — well past `far` — so they'd be fully fogged
+        // out if they respected this; createStarfield() opts the star material
+        // out via `fog: false` to keep the sky visible.
+        this.scene.fog = new THREE.Fog(SPACE_FOG_COLOR, 150, 700);
         this.setupLighting();
         this.createStarfield();
     }
@@ -77,7 +86,8 @@ export default class WorldManager {
             vertexColors: true,
             transparent: true,
             opacity: 0.8,
-            sizeAttenuation: true
+            sizeAttenuation: true,
+            fog: false // stars sit past the fog's `far` distance — opt out so the sky stays visible
         });
 
         this.stars = new THREE.Points(starGeo, starMat);
