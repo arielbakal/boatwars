@@ -380,10 +380,13 @@ export default class EntityFactory {
         // same code path every time) — safe under the shared seeded RNG.
         const planetSeed = Math.random() * 1000;
 
-        // Smooth-shaded materials for planet layers (not flat-shaded)
-        const coreMat = new THREE.MeshToonMaterial({ color: palette.baseRock, flatShading: false });
-        const soilMat = new THREE.MeshToonMaterial({ color: palette.soil, flatShading: false });
-        const surfaceMat = new THREE.MeshToonMaterial({ color: palette.groundTop, flatShading: false });
+        // Smooth-shaded materials for planet layers. r128's MeshToonMaterial has no
+        // flatShading property (was always a silent no-op / console warning) —
+        // smoothing here actually comes from the geometry never calling
+        // computeVertexNormals() with flat winding, not from this option.
+        const coreMat = new THREE.MeshToonMaterial({ color: palette.baseRock });
+        const soilMat = new THREE.MeshToonMaterial({ color: palette.soil });
+        const surfaceMat = new THREE.MeshToonMaterial({ color: palette.groundTop });
 
         // Core/soil/surface layers use distortGeometryFBM (coherent multi-octave
         // noise) instead of distortGeometryRadial — amplitudes chosen so the
@@ -606,7 +609,6 @@ export default class EntityFactory {
         // no visual cue to notice it.
         const goldMat = new THREE.MeshToonMaterial({
             color: 0xffd700,
-            flatShading: false,
             emissive: 0xffd700,
             emissiveIntensity: 0.6
         });
@@ -990,8 +992,8 @@ export default class EntityFactory {
 
     createPickaxe(palette, x, z) {
         const g = new THREE.Group();
-        const woodMaterial = new THREE.MeshToonMaterial({ color: 0x5d4037, flatShading: true });
-        const metalMaterial = new THREE.MeshToonMaterial({ color: 0x555555, flatShading: true });
+        const woodMaterial = new THREE.MeshToonMaterial({ color: 0x5d4037 });
+        const metalMaterial = new THREE.MeshToonMaterial({ color: 0x555555 });
 
         const handleGeo = new THREE.CylinderGeometry(0.0125, 0.015, 0.5, 6);
         const handle = new THREE.Mesh(handleGeo, woodMaterial);
@@ -1020,9 +1022,9 @@ export default class EntityFactory {
 
     createAxe(palette, x, z) {
         const g = new THREE.Group();
-        const woodMaterial = new THREE.MeshToonMaterial({ color: 0x5d4037, flatShading: true });
-        const metalMaterial = new THREE.MeshToonMaterial({ color: 0x78909c, flatShading: true });
-        const edgeMaterial = new THREE.MeshToonMaterial({ color: 0xeeeeee, flatShading: true });
+        const woodMaterial = new THREE.MeshToonMaterial({ color: 0x5d4037 });
+        const metalMaterial = new THREE.MeshToonMaterial({ color: 0x78909c });
+        const edgeMaterial = new THREE.MeshToonMaterial({ color: 0xeeeeee });
 
         const handleGeo = new THREE.CylinderGeometry(0.0125, 0.015, 0.5, 6);
         const handle = new THREE.Mesh(handleGeo, woodMaterial);
@@ -1064,8 +1066,7 @@ export default class EntityFactory {
         const crystalMat = new THREE.MeshToonMaterial({
             color: color,
             emissive: color,
-            emissiveIntensity: 0.6,
-            flatShading: true
+            emissiveIntensity: 0.6
         });
         const crystal = new THREE.Mesh(crystalGeo, crystalMat);
         crystal.position.y = 0.3;
@@ -1113,7 +1114,7 @@ export default class EntityFactory {
 
         // Cockpit dome
         const cockpitGeo = new THREE.SphereGeometry(0.5, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
-        const cockpitMat = new THREE.MeshToonMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5, flatShading: true });
+        const cockpitMat = new THREE.MeshToonMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5 });
         const cockpit = new THREE.Mesh(cockpitGeo, cockpitMat);
         cockpit.position.set(0, 0.5, -0.8);
         hullPivot.add(cockpit);

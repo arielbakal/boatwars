@@ -112,6 +112,10 @@ export default class WorldManager {
     }
 
     getMat(color, flat = true) {
-        return new THREE.MeshToonMaterial({ color: color, flatShading: flat });
+        // r128's MeshToonMaterial has no flatShading property — passing it was
+        // always a silent no-op (logs a console warning on every material
+        // creation). `flat` is kept as a parameter for call-site compatibility
+        // but intentionally unused now.
+        return new THREE.MeshToonMaterial({ color: color });
     }
 }
