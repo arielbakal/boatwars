@@ -18,7 +18,7 @@ export default class RemotePlayerManager {
     constructor(world, factory) {
         this.world = world;
         this.factory = factory; // needed to build/dispose remote ship models (createSpaceship)
-        this.players = new Map(); // id → { group, pivot, limbs, targetPos, targetRot, label }
+        this.players = new Map(); // id → { group, pivot, limbs, targetPos, targetRot, nameLabel }
     }
 
     /**
@@ -94,7 +94,10 @@ export default class RemotePlayerManager {
         armR.position.set(-0.35, 0.9, 0);
         pivot.add(armL, armR);
 
-        // Nametag (sprite)
+        // Name label (sprite) — billboard by default (THREE.Sprite always faces the
+        // camera), offset ~0.6 above the head (head.position.y = 1.2). Kept as a
+        // tracked reference (nameLabel) so removePlayer can dispose its texture/
+        // material instead of just detaching it with the rest of the group.
         const canvas = document.createElement('canvas');
         canvas.width = 256;
         canvas.height = 64;
@@ -107,10 +110,10 @@ export default class RemotePlayerManager {
         c.fillText(`Player ${id}`, 128, 42);
         const tex = new THREE.CanvasTexture(canvas);
         const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true });
-        const sprite = new THREE.Sprite(spriteMat);
-        sprite.position.y = 1.8;
-        sprite.scale.set(1.5, 0.4, 1);
-        group.add(sprite);
+        const nameLabel = new THREE.Sprite(spriteMat);
+        nameLabel.position.y = 1.8;
+        nameLabel.scale.set(1.5, 0.4, 1);
+        group.add(nameLabel);
 
         // Held-item container (attached to right arm at hand position)
         const heldItemContainer = new THREE.Group();
@@ -118,7 +121,7 @@ export default class RemotePlayerManager {
         heldItemContainer.visible = false;
         armR.add(heldItemContainer);
 
-        return { group, pivot, legL, legR, armL, armR, heldItemContainer, currentHeldType: null };
+        return { group, pivot, legL, legR, armL, armR, heldItemContainer, currentHeldType: null, nameLabel };
     }
 
     /**
@@ -173,9 +176,21 @@ export default class RemotePlayerManager {
         if (!p) return;
         this._removeRemoteShip(p);
         this._removeChatBubble(p);
+        this._removeNameLabel(p);
         this.world.remove(p.group);
         this.players.delete(id);
         console.log(`[Remote] Player ${id} removed`);
+    }
+
+    /** Dispose the name label's canvas texture/material (mirrors _removeChatBubble). */
+    _removeNameLabel(p) {
+        if (!p.nameLabel) return;
+        p.group.remove(p.nameLabel);
+        if (p.nameLabel.material) {
+            if (p.nameLabel.material.map) p.nameLabel.material.map.dispose();
+            p.nameLabel.material.dispose();
+        }
+        p.nameLabel = null;
     }
 
     // ===========================================
