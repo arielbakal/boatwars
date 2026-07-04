@@ -12,7 +12,17 @@ Rationale: the technical base is solid after the previous audit-fix cycle, but t
 
 Hygiene + Strategy A are implemented on branch `feat/core-loop`.
 
-> Pending from previous session: visual in-browser verification of `fix/space-gameplay-audit` has not been done yet.
+## Status (2026-07-04)
+
+All four strategies plus a comprehensive verification cycle are complete on `feat/core-loop`:
+
+- **Hygiene + Strategy A** — done (aggro, tiers, gold economy, essence caps, crafting UX).
+- **Playtest round 1 fixes** — ship jitter, Minecraft tool grip, gold glow/hint, inventory stacking, first-person polish (existing G-mode: crosshair, aim-synced combat, body hiding).
+- **Strategy B** — done (shared easing + dt-correct smoothing across ~25 sites, FOV kick, aerial pose, speed-matched walk, per-species creature locomotion, ship banking, camera shake, engine glow, pickup magnetism, damage numbers).
+- **Strategy C** — done (per-planet DNA, fresnel atmospheres on all planets, space fog, grass clumps, layered canopies, unique rock silhouettes, FBM terrain with flat detail cap, filmic tone mapping + sRGB, toon material unification).
+- **Comprehensive verification** — 3 fresh-context domain judges + dual-client Playwright runtime probe. All confirmed findings fixed, including two majors: the multiplayer world seed was never consumed on connect (players were always in different worlds — now bit-identical, runtime-proven), and the inventory stack-by-type fix had landed in a dead duplicated method. Re-probe: determinism PASS, zero console errors.
+
+Remaining (Strategy D leftovers + accepted gaps): render remote ships + broadcast attack swings + player chat UI + ship_built sync; inventory-placed creatures skip tiers; egg-in-inventory drops tier fields; LLM chief is canned; no persistence.
 
 ---
 
