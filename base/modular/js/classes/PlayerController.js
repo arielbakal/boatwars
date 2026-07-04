@@ -9,11 +9,7 @@ import {
     FRICTION_GROUND, FRICTION_STUN, ATTACK_SWING_DURATION
 } from '../constants.js';
 import SphericalUtils from './SphericalUtils.js';
-
-// --- Animation helper ---
-function easeInOutQuad(t) {
-    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-}
+import { easeInOutQuad, smoothFactor } from './Easing.js';
 
 // --- Held-tool grip (Minecraft-like) ---
 // Axe/pickaxe handle geometry (EntityFactory.createAxe/createPickaxe) is a cylinder of
@@ -254,7 +250,7 @@ export default class PlayerController {
                     let angleDiff = targetAngle - player.targetRotation;
                     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
                     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                    player.targetRotation += angleDiff * 0.2;
+                    player.targetRotation += angleDiff * smoothFactor(0.2, dt);
                 }
             } else {
                 // Apply friction to tangential velocity
@@ -383,14 +379,14 @@ export default class PlayerController {
         // Use a stable surface frame reference (NOT targetRotation) to avoid double rotation
         const surfNormal = SphericalUtils.getSurfaceNormal(player.pos, planet);
         const orientQ = SphericalUtils.getOrientationOnSurface(surfNormal, this._surfaceForward);
-        this.playerGroup.quaternion.slerp(orientQ, 0.15);
+        this.playerGroup.quaternion.slerp(orientQ, smoothFactor(0.15, dt));
 
         // --- Model pivot rotation: facing direction within the playerGroup's local frame ---
         // targetRotation is the angle relative to _surfaceForward, which matches
         // the playerGroup's local Z axis, so a local Y rotation by targetRotation is correct.
         const targetQ = new THREE.Quaternion();
         targetQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), player.targetRotation);
-        this.modelPivot.quaternion.slerp(targetQ, isMoving ? 0.2 : 0.1);
+        this.modelPivot.quaternion.slerp(targetQ, smoothFactor(isMoving ? 0.2 : 0.1, dt));
 
         // --- Invincibility flash ---
         if (state.invincibleTimer > 0 && this.modelPivot) {
@@ -422,12 +418,12 @@ export default class PlayerController {
             }
             this.armR.rotation.x = armAngleR;
             this.armL.rotation.x = armAngleL;
-            this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, 0.15);
-            this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, 0.15);
+            this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, smoothFactor(0.15, dt));
+            this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, smoothFactor(0.15, dt));
             // C5: subtle forward torso lurch timed with the strike (peak at swingT ~0.6)
             const lurcht = Math.max(0, Math.sin(swingT * Math.PI));
             this.modelPivot.position.z = lurcht * 0.08;
-            this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, 0.1);
+            this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, smoothFactor(0.1, dt));
         } else if (this.chopAnimState) {
             const { isSwinging, swingProgress } = this.chopAnimState;
             if (isSwinging) {
@@ -438,13 +434,13 @@ export default class PlayerController {
                 // C5: subtle torso lurch at mid-swing
                 this.modelPivot.position.z = easeInOutQuad(Math.min(t * 2, 1) * Math.max(0, 1 - (t - 0.5) * 2)) * 0.07;
             } else {
-                this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, -1.2, 0.15);
-                this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, 0.15);
+                this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, -1.2, smoothFactor(0.15, dt));
+                this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, smoothFactor(0.15, dt));
             }
-            this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, -0.3, 0.1);
-            this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, 0.1);
-            this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, 0.1);
-            this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, 0.1);
+            this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, -0.3, smoothFactor(0.1, dt));
+            this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, smoothFactor(0.1, dt));
+            this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, smoothFactor(0.1, dt));
+            this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, smoothFactor(0.1, dt));
         } else if (isMoving && player.onGround) {
             const walkCycle = this.time * 10;
             this.legL.rotation.x = Math.sin(walkCycle) * 0.8;
@@ -452,9 +448,9 @@ export default class PlayerController {
             this.armL.rotation.x = Math.sin(walkCycle + Math.PI) * 0.5;
             this.armR.rotation.x = Math.sin(walkCycle) * 0.5;
             this.modelPivot.position.y = Math.abs(Math.sin(walkCycle * 2)) * 0.05;
-            this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, 0.1);
+            this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, smoothFactor(0.1, dt));
         } else {
-            const lerp = 0.1;
+            const lerp = smoothFactor(0.1, dt);
             this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, lerp);
             this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, lerp);
             this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, 0, lerp);
@@ -464,7 +460,7 @@ export default class PlayerController {
         }
     }
 
-    updateCamera(camera) {
+    updateCamera(camera, dt = 0) {
         if (!this.playerGroup) return;
         const player = this.state.player;
         const ca = player.cameraAngle;
@@ -532,9 +528,9 @@ export default class PlayerController {
                 camera.position.copy(desiredPos);
                 this._lookTarget.copy(lookTarget);
             } else {
-                camera.position.lerp(desiredPos, CAMERA_LERP);
+                camera.position.lerp(desiredPos, smoothFactor(CAMERA_LERP, dt));
                 // C8: Smooth the lookAt target to avoid jarring snaps when surface normal changes fast
-                this._lookTarget.lerp(lookTarget, 0.2);
+                this._lookTarget.lerp(lookTarget, smoothFactor(0.2, dt));
             }
             camera.lookAt(this._lookTarget);
             camera.up.copy(up);

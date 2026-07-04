@@ -22,6 +22,7 @@ import {
     CAMERA_DISTANCE_BOAT
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
+import { smoothFactor } from '../classes/Easing.js';
 
 // Reusable temp vectors to reduce GC pressure
 const _tmpVec = new THREE.Vector3();
@@ -235,7 +236,7 @@ export default class BoatSystem {
             camDist * Math.cos(ca.x) * Math.cos(ca.y)
         );
         const desiredPos = player.pos.clone().add(camOffset);
-        camera.position.lerp(desiredPos, 0.08);
+        camera.position.lerp(desiredPos, smoothFactor(0.08, dt));
         camera.lookAt(player.pos);
     }
 
@@ -273,6 +274,12 @@ export default class BoatSystem {
      * In planet mode, "up" = surface normal.
      * In space mode, "up" = ship's current Y axis (no correction).
      * In transition, blend between them.
+     *
+     * NOT dt-corrected with smoothFactor(): this clamps the correction to a max
+     * ANGLE per frame (`Math.min(angle, SHIP_AUTO_LEVEL_SPEED)`) — a turn-rate
+     * limiter, not the `current += (target - current) * k` exponential-decay shape
+     * smoothFactor() re-derives. Left as-is; a correct dt-scaling here would be a
+     * linear one (`SHIP_AUTO_LEVEL_SPEED * dt * 60`), out of scope for this pass.
      */
     _autoLevelRoll(state) {
         const q = state.shipQuaternion;
@@ -306,7 +313,7 @@ export default class BoatSystem {
      * by projecting it onto the tangent plane. Keeps the ship from pitching into
      * the ground or pointing nose-up during taxi.
      */
-    _levelToSurface(state, boat) {
+    _levelToSurface(state, boat, dt) {
         const planet = state.shipNearestPlanet;
         if (!planet) return;
         const q = state.shipQuaternion;
@@ -314,7 +321,7 @@ export default class BoatSystem {
         const normal = _tmpVec.copy(boat.position).sub(planet.center).normalize();
         const forward = _tmpVec2.set(0, 0, -1).applyQuaternion(q).normalize();
         const target = SphericalUtils.getOrientationOnSurface(normal, forward);
-        q.slerp(target, SHIP_AUTO_LEVEL_SPEED).normalize();
+        q.slerp(target, smoothFactor(SHIP_AUTO_LEVEL_SPEED, dt)).normalize();
     }
 
     // ===========================================
@@ -442,8 +449,12 @@ export default class BoatSystem {
         // Leveling: while grounded keep the ship flush to the surface (Y-up = surface
         // normal, heading preserved); in free flight just keep a stable world horizon.
         if (state.shipGrounded && state.shipNearestPlanet) {
-            this._levelToSurface(state, boat);
+            this._levelToSurface(state, boat, dt);
         } else {
+            // Not converted: _autoLevelRoll caps the correction by a max ANGLE per
+            // frame (a turn-rate limiter), not an exponential decay toward a target —
+            // smoothFactor() only re-derives exponential lerp/slerp factors, so it
+            // doesn't apply to this pattern. See _autoLevelRoll for detail.
             this._autoLevelRoll(state);
         }
 
@@ -584,7 +595,7 @@ export default class BoatSystem {
         }
 
         // --- Camera ---
-        this._updateCamera(state, boat, camera, pc);
+        this._updateCamera(state, boat, camera, pc, dt);
 
         // --- Thruster particles ---
         this._emitThrusterParticles(state, boat, factory, q);
@@ -613,7 +624,7 @@ export default class BoatSystem {
     // CAMERA (CHASE + COCKPIT)
     // ===========================================
 
-    _updateCamera(state, boat, camera, pc) {
+    _updateCamera(state, boat, camera, pc, dt) {
         const q = state.shipQuaternion;
         const ca = state.player.cameraAngle;
 
@@ -628,7 +639,7 @@ export default class BoatSystem {
             const shipForward = _tmpVec.set(0, 0, -1).applyQuaternion(q).normalize();
             const lookTarget = cockpitPos.clone().addScaledVector(shipForward, 10);
 
-            camera.position.lerp(cockpitPos, 0.15);
+            camera.position.lerp(cockpitPos, smoothFactor(0.15, dt));
             camera.lookAt(lookTarget);
 
             // Hide player model in cockpit
@@ -659,7 +670,7 @@ export default class BoatSystem {
                 .addScaledVector(shipUp, camDist * Math.sin(orbitV) + 1.5);
 
             if (!isNaN(desiredPos.x) && !isNaN(desiredPos.y) && !isNaN(desiredPos.z)) {
-                camera.position.lerp(desiredPos, 0.08);
+                camera.position.lerp(desiredPos, smoothFactor(0.08, dt));
                 camera.lookAt(boat.position);
             }
         }

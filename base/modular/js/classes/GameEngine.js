@@ -884,7 +884,7 @@ export default class GameEngine {
                 // Boat system handles everything
             } else if (!state.isBoardingBoat) {
                 this.playerController.update(dt, state.islands);
-                this.playerController.updateCamera(camera);
+                this.playerController.updateCamera(camera, dt);
                 this.input.updateInteraction();
                 this.chopSystem.update(dt, ctx);
                 this.mineSystem.update(dt, ctx);

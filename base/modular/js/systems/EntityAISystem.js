@@ -9,6 +9,7 @@ import {
     AGGRO_RANGE, AGGRO_BASE_CHANCE, CREATURE_AGGRO_DURATION
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
+import { smoothFactor } from '../classes/Easing.js';
 
 export default class EntityAISystem {
     update(dt, context) {
@@ -22,7 +23,7 @@ export default class EntityAISystem {
             if (e.userData._dying) continue;
 
             // Pop-in scale
-            if (e.scale.x < 0.99) e.scale.lerp(new THREE.Vector3(1, 1, 1), 0.05);
+            if (e.scale.x < 0.99) e.scale.lerp(new THREE.Vector3(1, 1, 1), smoothFactor(0.05, dt));
 
             // --- Golem Animation ---
             if (e.userData.type === 'golem') {
@@ -55,7 +56,7 @@ export default class EntityAISystem {
                     const tmpObj = new THREE.Object3D();
                     tmpObj.position.copy(e.position);
                     tmpObj.lookAt(targetPos);
-                    e.quaternion.slerp(tmpObj.quaternion, 0.05);
+                    e.quaternion.slerp(tmpObj.quaternion, smoothFactor(0.05, dt));
                 }
             }
 
@@ -113,7 +114,7 @@ export default class EntityAISystem {
 
         // --- Food animation ---
         state.foods.forEach(f => {
-            if (f.scale.x < 0.99) f.scale.lerp(new THREE.Vector3(1, 1, 1), 0.05);
+            if (f.scale.x < 0.99) f.scale.lerp(new THREE.Vector3(1, 1, 1), smoothFactor(0.05, dt));
             const planet = f.userData.planet;
             if (planet) {
                 const normal = SphericalUtils.getSurfaceNormal(f.position, planet);
@@ -186,7 +187,7 @@ export default class EntityAISystem {
                     // Orient to face food
                     const normal = SphericalUtils.getSurfaceNormal(e.position, planet);
                     const q = SphericalUtils.getOrientationOnSurface(normal, dir);
-                    e.quaternion.slerp(q, 0.1);
+                    e.quaternion.slerp(q, smoothFactor(0.1, dt));
                 }
             } else {
                 // Wander on sphere surface
@@ -219,7 +220,7 @@ export default class EntityAISystem {
             // Re-orient on surface
             const normal = SphericalUtils.getSurfaceNormal(e.position, planet);
             const q = SphericalUtils.getOrientationOnSurface(normal);
-            e.quaternion.slerp(q, 0.05);
+            e.quaternion.slerp(q, smoothFactor(0.05, dt));
         }
 
         // Hungry warning

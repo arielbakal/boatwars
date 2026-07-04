@@ -3,6 +3,7 @@
 // =====================================================
 
 import SphericalUtils from '../classes/SphericalUtils.js';
+import { smoothFactor } from '../classes/Easing.js';
 
 export default class CatAI {
     update(dt, context) {
@@ -43,7 +44,7 @@ export default class CatAI {
                     // Orient toward boat
                     const normal = SphericalUtils.getSurfaceNormal(cat.position, catPlanet);
                     const q = SphericalUtils.getOrientationOnSurface(normal, dir);
-                    cat.quaternion.slerp(q, 0.2);
+                    cat.quaternion.slerp(q, smoothFactor(0.2, dt));
                     this.animateLegs(catData, t, 10, 0.06);
                 }
             }
@@ -57,9 +58,9 @@ export default class CatAI {
                 const dir = playerPos.clone().sub(cat.position).normalize();
                 const normal = SphericalUtils.getSurfaceNormal(cat.position, catPlanet);
                 const q = SphericalUtils.getOrientationOnSurface(normal, dir);
-                cat.quaternion.slerp(q, 0.05);
+                cat.quaternion.slerp(q, smoothFactor(0.05, dt));
             }
-            this.resetLegs(catData);
+            this.resetLegs(catData, dt);
         } else if (dist > catData.followDist) {
             // Follow player
             catData.isIdle = false;
@@ -69,7 +70,7 @@ export default class CatAI {
             cat.position.copy(newPos);
             const normal = SphericalUtils.getSurfaceNormal(cat.position, catPlanet);
             const q = SphericalUtils.getOrientationOnSurface(normal, dir);
-            cat.quaternion.slerp(q, 0.15);
+            cat.quaternion.slerp(q, smoothFactor(0.15, dt));
             this.animateLegs(catData, t, 8, 0.05);
         } else {
             // Idle near player
@@ -78,9 +79,9 @@ export default class CatAI {
                 const dir = playerPos.clone().sub(cat.position).normalize();
                 const normal = SphericalUtils.getSurfaceNormal(cat.position, catPlanet);
                 const q = SphericalUtils.getOrientationOnSurface(normal, dir);
-                cat.quaternion.slerp(q, 0.05);
+                cat.quaternion.slerp(q, smoothFactor(0.05, dt));
             }
-            this.resetLegs(catData);
+            this.resetLegs(catData, dt);
         }
 
         // Tail sway
@@ -97,7 +98,7 @@ export default class CatAI {
 
         // Re-orient on surface
         const q = SphericalUtils.getOrientationOnSurface(normal);
-        cat.quaternion.slerp(q, 0.05);
+        cat.quaternion.slerp(q, smoothFactor(0.05, dt));
 
         // Clamp to planet region
         const bc = cat.userData.boundCenter;
@@ -127,12 +128,13 @@ export default class CatAI {
         catData.legs[3].rotation.x = Math.sin(c) * swingAmp;
     }
 
-    resetLegs(catData) {
+    resetLegs(catData, dt) {
         if (!catData.legs) return;
+        const factor = smoothFactor(0.1, dt);
         catData.legs.forEach(leg => {
-            leg.position.y += (0.1 - leg.position.y) * 0.1;
+            leg.position.y += (0.1 - leg.position.y) * factor;
             // C9: relax the walk swing too, or legs freeze tilted when the cat stops
-            leg.rotation.x += (0 - leg.rotation.x) * 0.1;
+            leg.rotation.x += (0 - leg.rotation.x) * factor;
         });
     }
 }

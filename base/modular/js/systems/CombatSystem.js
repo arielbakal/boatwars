@@ -13,6 +13,7 @@ import {
     ESSENCE_ATTACK_CAP_MULT, ESSENCE_SPEED_BOOST_CAP_MULT, ESSENCE_MAX_HP_CAP_MULT
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
+import { smoothFactor } from '../classes/Easing.js';
 
 export default class CombatSystem {
     constructor(ui) {
@@ -224,8 +225,11 @@ export default class CombatSystem {
         for (const e of state.entities) {
             if (!e.userData._knockTarget || !e.userData._knockTimer) continue;
             e.userData._knockTimer -= dt;
-            // Lerp toward knock target; ~0.4 per frame at 60fps ≈ 4-frame travel
-            e.position.lerp(e.userData._knockTarget, 0.4);
+            // Lerp toward knock target; ~0.4 per frame at 60fps ≈ 4-frame travel.
+            // _knockTimer forces an exact snap to the target when it expires (below),
+            // so dt-correcting this factor only makes the approach curve itself
+            // consistent across frame rates — the travel still always finishes on time.
+            e.position.lerp(e.userData._knockTarget, smoothFactor(0.4, dt));
             if (e.userData._knockTimer <= 0) {
                 e.position.copy(e.userData._knockTarget);
                 e.userData._knockTarget = null;
@@ -343,7 +347,7 @@ export default class CombatSystem {
                     // Orient toward player on surface
                     const normal = SphericalUtils.getSurfaceNormal(e.position, planet);
                     const q = SphericalUtils.getOrientationOnSurface(normal, dir);
-                    e.quaternion.slerp(q, 0.15);
+                    e.quaternion.slerp(q, smoothFactor(0.15, dt));
                 } else {
                     e.position.add(dir.multiplyScalar(speed));
                 }
@@ -376,7 +380,7 @@ export default class CombatSystem {
             const boost = state.statBoosts[i];
 
             if (boost.scale.x < 0.99) {
-                boost.scale.lerp(new THREE.Vector3(1, 1, 1), 0.05);
+                boost.scale.lerp(new THREE.Vector3(1, 1, 1), smoothFactor(0.05, dt));
             }
 
             const crystal = boost.userData.crystal;

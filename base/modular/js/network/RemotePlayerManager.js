@@ -2,6 +2,8 @@
 // REMOTE PLAYER MANAGER - Renders other players in 3D
 // =====================================================
 
+import { smoothFactor } from '../classes/Easing.js';
+
 export default class RemotePlayerManager {
     constructor(world) {
         this.world = world;
@@ -294,13 +296,13 @@ export default class RemotePlayerManager {
             p.time += dt;
 
             // Smooth position interpolation
-            p.currentPos.lerp(p.targetPos, 0.15);
+            p.currentPos.lerp(p.targetPos, smoothFactor(0.15, dt));
             p.group.position.copy(p.currentPos);
 
             // Smooth rotation
             const targetQ = new THREE.Quaternion();
             targetQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.targetRot);
-            p.pivot.quaternion.slerp(targetQ, 0.15);
+            p.pivot.quaternion.slerp(targetQ, smoothFactor(0.15, dt));
 
             // Walk animation when moving
             const dx = p.targetPos.x - p.currentPos.x;
@@ -319,7 +321,8 @@ export default class RemotePlayerManager {
                     const swing = p.time * 8;
                     p.armR.rotation.x = Math.sin(swing) * 1.2;
                 } else {
-                    const lerp = 0.1;
+                    // Flat 0.1 decay toward 0 (`x *= 1 - k` == `x += (0 - x) * k`), dt-corrected
+                    const lerp = smoothFactor(0.1, dt);
                     p.legL.rotation.x *= (1 - lerp);
                     p.legR.rotation.x *= (1 - lerp);
                     p.armL.rotation.x *= (1 - lerp);

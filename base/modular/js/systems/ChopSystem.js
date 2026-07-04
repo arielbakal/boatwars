@@ -4,6 +4,7 @@
 
 import { CHOP_HITS, HIT_INTERVAL, CHOP_MAX_RANGE } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
+import { smoothFactor } from '../classes/Easing.js';
 
 export default class ChopSystem {
     constructor(ui) {
@@ -56,7 +57,7 @@ export default class ChopSystem {
             if (planet) {
                 const normal = SphericalUtils.getSurfaceNormal(state.player.pos, planet);
                 const q = SphericalUtils.getOrientationOnSurface(normal, faceDir);
-                playerController.playerGroup.quaternion.slerp(q, 0.2);
+                playerController.playerGroup.quaternion.slerp(q, smoothFactor(0.2, dt));
             }
         }
 
