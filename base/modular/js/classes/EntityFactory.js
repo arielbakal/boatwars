@@ -206,6 +206,101 @@ export default class EntityFactory {
     }
 
     /**
+     * Deterministic 3D hash -> value in [-1, 1]. Classic GLSL-style sin/fract
+     * hash, pure function of its inputs (no Math.random()) so results only
+     * depend on (x, y, z) — used as the corner-sample source for
+     * _valueNoise3 below.
+     */
+    _hash3(x, y, z) {
+        const s = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453123;
+        return 2.0 * (s - Math.floor(s)) - 1.0;
+    }
+
+    /**
+     * Single-octave 3D value noise: trilinear interpolation (with a
+     * smoothstep-eased blend, not a raw lerp) between the 8 hashed lattice
+     * corners surrounding (x, y, z). Continuous and coherent — neighboring
+     * samples produce similar values, unlike raw hash noise.
+     */
+    _valueNoise3(x, y, z) {
+        const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+        const xf = x - xi, yf = y - yi, zf = z - zi;
+        const u = xf * xf * (3 - 2 * xf);
+        const v = yf * yf * (3 - 2 * yf);
+        const w = zf * zf * (3 - 2 * zf);
+        const lerp = (a, b, t) => a + t * (b - a);
+        const n000 = this._hash3(xi, yi, zi);
+        const n100 = this._hash3(xi + 1, yi, zi);
+        const n010 = this._hash3(xi, yi + 1, zi);
+        const n110 = this._hash3(xi + 1, yi + 1, zi);
+        const n001 = this._hash3(xi, yi, zi + 1);
+        const n101 = this._hash3(xi + 1, yi, zi + 1);
+        const n011 = this._hash3(xi, yi + 1, zi + 1);
+        const n111 = this._hash3(xi + 1, yi + 1, zi + 1);
+        const nx00 = lerp(n000, n100, u);
+        const nx10 = lerp(n010, n110, u);
+        const nx01 = lerp(n001, n101, u);
+        const nx11 = lerp(n011, n111, u);
+        const nxy0 = lerp(nx00, nx10, v);
+        const nxy1 = lerp(nx01, nx11, v);
+        return lerp(nxy0, nxy1, w);
+    }
+
+    /**
+     * Multi-octave (fbm) terrain displacement — used ONLY by createPlanet's
+     * layers (core/soil/surface). Distinct from distortGeometryRadial, which
+     * rocks/mountains/gold ore still depend on and which is NOT touched here.
+     *
+     * Displaces each vertex along its own radial direction by a sum of 3
+     * halving-amplitude/increasing-frequency value-noise octaves sampled from
+     * (normalized vertex direction * frequency + planetSeed). Pure function of
+     * (geometry, planetSeed, amplitude) — no Math.random() anywhere in this
+     * method — so every client renders byte-identical terrain from the same
+     * seed, and per-vertex evaluation order doesn't matter (each vertex only
+     * reads its own direction). `planetSeed` is the one seeded Math.random()
+     * roll createPlanet takes per planet (see caller).
+     *
+     * `amplitude` is the octave-1 amplitude; octaves 2 and 3 contribute half
+     * and a quarter of that on top (max combined offset ~= amplitude * 1.75),
+     * so callers should pass a smaller base amplitude than the old single-
+     * octave `distortGeometryRadial` intensity to land in the same height range
+     * while gaining coherent macro-features (basins/ridges) from the lower
+     * octaves instead of high-frequency noise alone.
+     */
+    distortGeometryFBM(geometry, planetSeed, amplitude) {
+        const merged = this.mergeVertices(geometry);
+        const posAttribute = merged.attributes.position;
+        const baseFreq = 1.5;
+        const octaves = [
+            { freq: baseFreq, amp: amplitude },
+            { freq: baseFreq * 2.1, amp: amplitude * 0.5 },
+            { freq: baseFreq * 4.3, amp: amplitude * 0.25 }
+        ];
+        for (let i = 0; i < posAttribute.count; i++) {
+            const x = posAttribute.getX(i);
+            const y = posAttribute.getY(i);
+            const z = posAttribute.getZ(i);
+            const len = Math.sqrt(x * x + y * y + z * z);
+            if (len < 0.001) continue;
+            const nx = x / len, ny = y / len, nz = z / len;
+            let noise = 0;
+            for (const oct of octaves) {
+                noise += this._valueNoise3(
+                    nx * oct.freq + planetSeed,
+                    ny * oct.freq + planetSeed * 1.3,
+                    nz * oct.freq + planetSeed * 0.7
+                ) * oct.amp;
+            }
+            posAttribute.setX(i, x + nx * noise);
+            posAttribute.setY(i, y + ny * noise);
+            posAttribute.setZ(i, z + nz * noise);
+        }
+        posAttribute.needsUpdate = true;
+        merged.computeVertexNormals();
+        return merged;
+    }
+
+    /**
      * Merge several transformed box geometries into a single non-indexed
      * BufferGeometry (position + normal only — no UVs needed, everything
      * here uses flat-color toon materials). r128 ships no
@@ -272,30 +367,46 @@ export default class EntityFactory {
      */
     createPlanet(palette, cx, cy, cz, radius, hasAtmosphere = false) {
         const g = new THREE.Group();
-        // Higher detail for smoother spheres: min 4, max 6
-        const detail = Math.max(4, Math.min(6, Math.floor(radius / 4)));
-        const seed = cx * 7 + cy * 13 + cz * 19 + radius; // deterministic per planet
+        // C4: flat detail cap for every planet. The old radius-scaled formula
+        // (up to 6) put planet 3 (r=30) at ~246K tris across its 3 layers; at
+        // 0.5 render scale + pixelation that vertex density is imperceptible,
+        // so cap everyone at 4 (~5K tris/layer) and spend the budget on FBM
+        // noise (below) instead of raw mesh resolution.
+        const detail = 4;
+        const seed = cx * 7 + cy * 13 + cz * 19 + radius; // deterministic per planet (position/size only)
+        // C4: one seeded Math.random() roll per planet, feeding distortGeometryFBM
+        // below so terrain varies planet-to-planet independent of position/radius.
+        // Unconditional + fixed call order (exactly one roll per createPlanet call,
+        // same code path every time) — safe under the shared seeded RNG.
+        const planetSeed = Math.random() * 1000;
 
         // Smooth-shaded materials for planet layers (not flat-shaded)
         const coreMat = new THREE.MeshToonMaterial({ color: palette.baseRock, flatShading: false });
         const soilMat = new THREE.MeshToonMaterial({ color: palette.soil, flatShading: false });
         const surfaceMat = new THREE.MeshToonMaterial({ color: palette.groundTop, flatShading: false });
 
+        // Core/soil/surface layers use distortGeometryFBM (coherent multi-octave
+        // noise) instead of distortGeometryRadial — amplitudes chosen so the
+        // combined 3-octave height range (~1.75x the base amplitude below)
+        // lands at or under the old single-octave intensities (0.04/0.03/0.02
+        // x radius) while gaining macro basins/ridges instead of pure high-
+        // frequency bumps.
+
         // Core rock layer
         const coreGeoRaw = new THREE.IcosahedronGeometry(radius * 0.95, detail);
-        const coreGeo = this.distortGeometryRadial(coreGeoRaw, radius * 0.04, seed + 1);
+        const coreGeo = this.distortGeometryFBM(coreGeoRaw, planetSeed + 1, radius * 0.023);
         const core = new THREE.Mesh(coreGeo, coreMat);
         g.add(core);
 
         // Soil layer
         const soilGeoRaw = new THREE.IcosahedronGeometry(radius * 0.98, detail);
-        const soilGeo = this.distortGeometryRadial(soilGeoRaw, radius * 0.03, seed + 2);
+        const soilGeo = this.distortGeometryFBM(soilGeoRaw, planetSeed + 2, radius * 0.017);
         const soil = new THREE.Mesh(soilGeo, soilMat);
         g.add(soil);
 
         // Surface (grass) layer - the main collision surface
         const surfaceGeoRaw = new THREE.IcosahedronGeometry(radius, detail);
-        const surfaceGeo = this.distortGeometryRadial(surfaceGeoRaw, radius * 0.02, seed + 3);
+        const surfaceGeo = this.distortGeometryFBM(surfaceGeoRaw, planetSeed + 3, radius * 0.011);
         const surface = new THREE.Mesh(surfaceGeo, surfaceMat);
         surface.userData = { type: 'ground' };
         g.add(surface);
