@@ -22,7 +22,10 @@ All four strategies plus a comprehensive verification cycle are complete on `fea
 - **Strategy C** — done (per-planet DNA, fresnel atmospheres on all planets, space fog, grass clumps, layered canopies, unique rock silhouettes, FBM terrain with flat detail cap, filmic tone mapping + sRGB, toon material unification).
 - **Comprehensive verification** — 3 fresh-context domain judges + dual-client Playwright runtime probe. All confirmed findings fixed, including two majors: the multiplayer world seed was never consumed on connect (players were always in different worlds — now bit-identical, runtime-proven), and the inventory stack-by-type fix had landed in a dead duplicated method. Re-probe: determinism PASS, zero console errors.
 
-Remaining (Strategy D leftovers + accepted gaps): render remote ships + broadcast attack swings + player chat UI + ship_built sync; inventory-placed creatures skip tiers; egg-in-inventory drops tier fields; LLM chief is canned; no persistence.
+- **Strategy D** — done (remote ships rendered + pilots seated, attack swings broadcast via attackSeq + eased remote tool swings, player chat with focus-gated input and overhead bubbles, ship construction + log placement synced). Plus: server player_state relay completed (it was silently dropping attackSeq/shipPosition/shipQuaternion/shipSpeed — remote melee swings had never worked), name-label disposal leak fixed, join/leave toasts verified pre-existing.
+- **Final visual verification** — dual-client probe, 7/7 PASS, zero console errors: world sync, name labels, chat end-to-end (391ms latency), chat focus gating, attackSeq propagation through the restarted relay, smooth remote walk interpolation.
+
+Remaining (accepted gaps): remote-synced log pickup not broadcast (can locally desync, consistent with the protocol's non-authoritative style); inventory-placed creatures skip tiers; egg-in-inventory drops tier fields; LLM chief is canned; no persistence. Remote ships in actual flight not yet human-verified (headless probe can't build/board a ship).
 
 ---
 
