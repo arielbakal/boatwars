@@ -64,7 +64,7 @@ export default class GameEngine {
         this.systems.register('combat', this.combatSystem);
 
         this.network = new NetworkManager();
-        this.remotePlayers = new RemotePlayerManager(this.world);
+        this.remotePlayers = new RemotePlayerManager(this.world, this.factory);
         this._setupNetworkCallbacks();
         this._lastSelectedSlot = null;
 
@@ -1044,7 +1044,7 @@ export default class GameEngine {
 
             // Multiplayer
             this.network.sendPlayerState(state);
-            this.remotePlayers.update(dt);
+            this.remotePlayers.update(dt, state.islands);
 
             if (this._lastSelectedSlot !== state.selectedSlot) {
                 this._lastSelectedSlot = state.selectedSlot;

@@ -3,10 +3,21 @@
 // =====================================================
 
 import { smoothFactor } from '../classes/Easing.js';
+import SphericalUtils from '../classes/SphericalUtils.js';
+import { SHIP_MAX_SPEED } from '../constants.js';
+
+// Reusable temp objects to reduce GC pressure in the per-frame update loop
+// (mirrors the _tmpVec convention in BoatSystem.js).
+const _tmpAvatarQuat = new THREE.Quaternion();
+const _tmpAvatarAxis = new THREE.Vector3(0, 1, 0);
+const _tmpShipDelta = new THREE.Vector3();
+const _tmpShipForward = new THREE.Vector3(0, 0, -1);
+const _tmpShipUp = new THREE.Vector3(0, 1, 0);
 
 export default class RemotePlayerManager {
-    constructor(world) {
+    constructor(world, factory) {
         this.world = world;
+        this.factory = factory; // needed to build/dispose remote ship models (createSpaceship)
         this.players = new Map(); // id → { group, pivot, limbs, targetPos, targetRot, label }
     }
 
@@ -130,6 +141,10 @@ export default class RemotePlayerManager {
             currentRot: data.rotation || 0,
             time: 0,
             isOnBoat: false,
+            _wasOnBoat: false,
+            ship: null,           // lazily-built remote-only ship model (see _updateRemoteShip)
+            shipHeading: null,    // last observed movement direction, used as a quaternion proxy
+            shipSpeedSmoothed: 0, // derived speed (position delta / dt) for the engine-glow pulse
             activeAction: null,
             inventory: data.inventory || null,
             selectedSlot: data.selectedSlot ?? null
@@ -149,6 +164,7 @@ export default class RemotePlayerManager {
     removePlayer(id) {
         const p = this.players.get(id);
         if (!p) return;
+        this._removeRemoteShip(p);
         this.world.remove(p.group);
         this.players.delete(id);
         console.log(`[Remote] Player ${id} removed`);
@@ -288,10 +304,127 @@ export default class RemotePlayerManager {
         return g;
     }
 
+    // ===========================================
+    // REMOTE SHIP RENDERING (Strategy D unit 1)
+    // ===========================================
+    // The server's player_state relay (server/index.js) does NOT forward
+    // shipPosition/shipQuaternion/shipSpeed — only position/rotation/isOnBoat/
+    // activeAction reach other clients (see AUDIT.md + final report). This ship
+    // is therefore an approximation built entirely from those four fields:
+    //   - position: BoatSystem._positionPlayerOnShip sets the pilot's own
+    //     position to boat.position + a small (~0.6 unit) seat offset every
+    //     physics frame while piloting, so it doubles as a decent ship-anchor.
+    //   - orientation: no quaternion is available at all, so it's inferred from
+    //     observed movement heading, re-leveled against the nearest planet's
+    //     surface normal when close to one (mirrors BoatSystem's own grounded
+    //     vs. free-flight leveling split).
+    //   - speed (for the engine-glow pulse): derived from the position delta
+    //     instead of the never-relayed shipSpeed field.
+    // A real fix needs server/index.js's player_state case to pass those three
+    // fields through — out of scope here (client-files-only constraint).
+
+    /** Build a fresh remote-only ship model, colored to match the pilot's avatar. */
+    _buildRemoteShip(id) {
+        const colors = this._playerColors(id);
+        const ship = this.factory.createSpaceship(0, 0, 0, new THREE.Color(colors.body));
+        // Cache engine-glow meshes once (mirrors BoatSystem._cacheEngineGlows) instead
+        // of traversing the hierarchy every frame just to find them.
+        const glows = [];
+        ship.traverse(child => {
+            if (child.userData && child.userData.isEngineGlow) glows.push(child);
+        });
+        ship.userData._engineGlowMeshes = glows;
+        return ship;
+    }
+
+    /**
+     * Position/orient the pilot's ship and pulse its engine glow. Visual only —
+     * never added to state.entities/obstacles, so it can't be boarded, collided
+     * with, or picked up by the boat-proximity scan (BoatSystem.updateProximity).
+     */
+    _updateRemoteShip(id, p, dt, islands) {
+        if (!p.ship) {
+            p.ship = this._buildRemoteShip(id);
+            this.world.add(p.ship);
+        }
+        const ship = p.ship;
+
+        ship.position.copy(p.currentPos);
+
+        // Heading proxy: only updates while actually moving, so the ship keeps
+        // facing its last known direction while stopped instead of snapping.
+        _tmpShipDelta.copy(p.targetPos).sub(p.currentPos);
+        if (_tmpShipDelta.lengthSq() > 0.0004) {
+            p.shipHeading = (p.shipHeading || new THREE.Vector3()).copy(_tmpShipDelta).normalize();
+        }
+        const forward = p.shipHeading || _tmpShipForward;
+
+        // Flush to the nearest planet's surface normal when close to one (mirrors
+        // BoatSystem._levelToSurface); otherwise a stable world-up horizon (mirrors
+        // BoatSystem._autoLevelRoll's free-flight case).
+        _tmpShipUp.set(0, 1, 0);
+        if (islands && islands.length) {
+            const nearest = SphericalUtils.findNearestPlanet(ship.position, islands);
+            if (nearest && nearest.planet && nearest.distance < nearest.planet.radius * 1.5) {
+                _tmpShipUp.copy(ship.position).sub(nearest.planet.center).normalize();
+            }
+        }
+        const targetQ = SphericalUtils.getOrientationOnSurface(_tmpShipUp, forward);
+        ship.quaternion.slerp(targetQ, smoothFactor(0.12, dt));
+
+        // Derived-speed engine glow (shipSpeed is never relayed — see NOTE above).
+        const observedSpeed = _tmpShipDelta.length() / Math.max(dt, 0.0001);
+        p.shipSpeedSmoothed = THREE.MathUtils.lerp(p.shipSpeedSmoothed || 0, observedSpeed, smoothFactor(0.2, dt));
+        this._updateRemoteEngineGlow(ship, p.shipSpeedSmoothed);
+    }
+
+    _updateRemoteEngineGlow(ship, speedUnitsPerSecond) {
+        const glows = ship.userData._engineGlowMeshes;
+        if (!glows || !glows.length) return;
+        // BoatSystem's ship speed is an un-dt-scaled per-frame delta (assumes 60fps);
+        // *60 converts SHIP_MAX_SPEED to the same units/second basis as our derived speed.
+        const referenceMax = SHIP_MAX_SPEED * 60;
+        const ratio = THREE.MathUtils.clamp(speedUnitsPerSecond / referenceMax, 0, 1);
+        const opacity = THREE.MathUtils.clamp(0.35 + ratio * 0.55, 0.2, 1.0);
+        const scale = 1 + ratio * 0.25;
+        for (const glow of glows) {
+            if (glow.material) glow.material.opacity = opacity;
+            glow.scale.setScalar(scale);
+        }
+    }
+
+    /** Dispose and drop the remote ship model (disembark, player leave, cleanup). */
+    _removeRemoteShip(p) {
+        if (!p.ship) return;
+        this.world.remove(p.ship);
+        if (this.factory) this.factory.disposeHierarchy(p.ship);
+        p.ship = null;
+        p.shipHeading = null;
+        p.shipSpeedSmoothed = 0;
+    }
+
+    /** Seated pilot pose — mirrors BoatSystem.setSeatedPose, adapted to remote field names. */
+    _applySeatedPose(p) {
+        if (p.legL) { p.legL.rotation.x = -Math.PI / 2; p.legL.position.y = 0.3; }
+        if (p.legR) { p.legR.rotation.x = -Math.PI / 2; p.legR.position.y = 0.3; }
+        if (p.armL) { p.armL.rotation.x = -0.4; p.armL.rotation.z = 0.25; }
+        if (p.armR) { p.armR.rotation.x = -0.4; p.armR.rotation.z = -0.25; }
+        if (p.pivot) p.pivot.position.y = -0.20;
+    }
+
+    /** Mirrors BoatSystem.resetSeatedPose — restores the on-foot rest pose on disembark. */
+    _resetSeatedPose(p) {
+        if (p.legL) { p.legL.rotation.x = 0; p.legL.position.y = 0.4; }
+        if (p.legR) { p.legR.rotation.x = 0; p.legR.position.y = 0.4; }
+        if (p.armL) p.armL.rotation.set(0, 0, 0);
+        if (p.armR) p.armR.rotation.set(0, 0, 0);
+        if (p.pivot) p.pivot.position.y = 0;
+    }
+
     /**
      * Per-frame interpolation for smooth movement
      */
-    update(dt) {
+    update(dt, islands) {
         for (const [id, p] of this.players) {
             p.time += dt;
 
@@ -300,14 +433,31 @@ export default class RemotePlayerManager {
             p.group.position.copy(p.currentPos);
 
             // Smooth rotation
-            const targetQ = new THREE.Quaternion();
-            targetQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.targetRot);
+            const targetQ = _tmpAvatarQuat.setFromAxisAngle(_tmpAvatarAxis, p.targetRot);
             p.pivot.quaternion.slerp(targetQ, smoothFactor(0.15, dt));
 
             // Walk animation when moving
             const dx = p.targetPos.x - p.currentPos.x;
             const dz = p.targetPos.z - p.currentPos.z;
             const isMoving = (dx * dx + dz * dz) > 0.0001;
+
+            // Ship render + seating (Strategy D unit 1)
+            if (p.isOnBoat) {
+                this._updateRemoteShip(id, p, dt, islands);
+            } else if (p.ship) {
+                this._removeRemoteShip(p);
+            }
+            if (p.isOnBoat) {
+                this._applySeatedPose(p);
+            } else if (p._wasOnBoat) {
+                this._resetSeatedPose(p);
+            }
+            p._wasOnBoat = p.isOnBoat;
+
+            if (p.isOnBoat) {
+                // Seated — walk/chop/mine animation is suppressed entirely while piloting.
+                continue;
+            }
 
             if (isMoving) {
                 const walkCycle = p.time * 10;
