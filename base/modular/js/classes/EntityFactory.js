@@ -418,7 +418,10 @@ export default class EntityFactory {
         const g = new THREE.Group();
         const stoneMat = this.getMat(p.baseRock.clone().lerp(new THREE.Color(0x888888), 0.5));
 
-        const peakGeo = new THREE.ConeGeometry(10 * scale, 12 * scale, 6);
+        // Light distortion on the main peak and sub-peaks so mountains stop
+        // being pristine cone clones — kept subtle (small factor) since these
+        // are large silhouettes seen from a distance. Snow cap left pristine.
+        const peakGeo = this.distortGeometryRadial(new THREE.ConeGeometry(10 * scale, 12 * scale, 6), scale * 0.5, Math.random() * 1000);
         const peak = new THREE.Mesh(peakGeo, stoneMat);
         peak.position.y = 5 * scale;
         g.add(peak);
@@ -430,7 +433,7 @@ export default class EntityFactory {
 
         for (let i = 0; i < 4; i++) {
             const s = (0.5 + Math.random() * 0.5) * scale;
-            const subPeakGeo = new THREE.ConeGeometry(6 * s, 8 * s, 5);
+            const subPeakGeo = this.distortGeometryRadial(new THREE.ConeGeometry(6 * s, 8 * s, 5), s * 0.4, Math.random() * 1000);
             const subPeak = new THREE.Mesh(subPeakGeo, stoneMat);
             const ang = (i / 4) * Math.PI * 2;
             const dist = 6 * scale;
@@ -458,7 +461,14 @@ export default class EntityFactory {
             emissiveIntensity: 0.6
         });
 
-        const rockGeo = new THREE.DodecahedronGeometry(0.8 * scale, 0);
+        // Distort the stone body only — same subtle-lumpiness factor as
+        // regular ico/dodec rocks. Ore chunks stay pristine boxes so their
+        // emissive glow silhouette reads clearly against the rough rock.
+        const rockGeo = this.distortGeometryRadial(
+            new THREE.DodecahedronGeometry(0.8 * scale, 0),
+            0.8 * scale * (0.12 + Math.random() * 0.06),
+            Math.random() * 1000
+        );
         const rock = new THREE.Mesh(rockGeo, stoneMat);
         g.add(rock);
 
@@ -573,6 +583,13 @@ export default class EntityFactory {
         let geo = dna.shape === 'ico' ? new THREE.IcosahedronGeometry(0.35, 0) :
             dna.shape === 'box' ? new THREE.BoxGeometry(0.6, 0.5, 0.6) :
                 dna.shape === 'slab' ? new THREE.BoxGeometry(0.7, 0.25, 0.5) : new THREE.DodecahedronGeometry(0.35);
+        // Distort into a unique per-instance silhouette instead of a pristine
+        // primitive clone. Box gets a lower factor — its flat faces read as
+        // "broken" faster than the convex ico/dodec/slab shapes under the
+        // same displacement, so it stays subtle lumpiness instead of a blob.
+        const rockUnitSize = dna.shape === 'box' ? 0.55 : dna.shape === 'slab' ? 0.6 : 0.35;
+        const rockDistortFactor = dna.shape === 'box' ? 0.06 + Math.random() * 0.03 : 0.12 + Math.random() * 0.06;
+        geo = this.distortGeometryRadial(geo, rockUnitSize * rockDistortFactor, Math.random() * 1000);
         const m = new THREE.Mesh(geo, this.getMat(dna.color));
         if (dna.shape === 'slab') m.rotation.y = Math.random() * Math.PI;
         else m.rotation.set(Math.random(), Math.random(), Math.random());
