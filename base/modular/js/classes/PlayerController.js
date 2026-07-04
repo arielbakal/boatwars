@@ -531,6 +531,7 @@ export default class PlayerController {
             // First person: camera at player pos + up * eye height
             const eyePos = player.pos.clone().add(up.clone().multiplyScalar(1.0));
             camera.position.copy(eyePos);
+            this._applyCameraShake(camera);
 
             // Look direction relative to surface frame
             const lookFwd = this._surfaceForward.clone()
@@ -584,9 +585,26 @@ export default class PlayerController {
                 // C8: Smooth the lookAt target to avoid jarring snaps when surface normal changes fast
                 this._lookTarget.lerp(lookTarget, smoothFactor(0.2, dt));
             }
+            this._applyCameraShake(camera);
             camera.lookAt(this._lookTarget);
             camera.up.copy(up);
         }
+    }
+
+    /**
+     * Apply the current camera-shake magnitude (state.cameraShake, decayed each
+     * frame by ParticleSystem) as a small random offset to the camera's FINAL
+     * position. Called after the position is fully resolved (post-lerp for third
+     * person, post-copy for first person) and before lookAt(), so the look
+     * direction re-settles onto the same aim point from the jittered position —
+     * that's what reads as "shake" rather than a plain camera translate.
+     */
+    _applyCameraShake(camera) {
+        const shake = this.state.cameraShake;
+        if (!shake) return;
+        camera.position.x += (Math.random() - 0.5) * 2 * shake;
+        camera.position.y += (Math.random() - 0.5) * 2 * shake;
+        camera.position.z += (Math.random() - 0.5) * 2 * shake;
     }
 
     /** Get the current surface normal (up direction) */

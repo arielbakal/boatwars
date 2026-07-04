@@ -101,5 +101,15 @@ export default class GameState {
         this.catOnBoat = false;
         this.catBoardingQueued = false;
         this.catBoardingDelay = 0;
+
+        // Camera shake (game feel) — magnitude decays toward 0 each frame
+        // (ParticleSystem owns the decay; see addShake()/consumers in
+        // PlayerController.updateCamera and BoatSystem._updateCamera).
+        this.cameraShake = 0;
+    }
+
+    /** Add camera shake magnitude, clamped to a sane max so hits can't compound into chaos. */
+    addShake(amount) {
+        this.cameraShake = Math.min(0.5, (this.cameraShake || 0) + amount);
     }
 }

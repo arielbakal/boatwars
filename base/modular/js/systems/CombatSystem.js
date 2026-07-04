@@ -171,6 +171,7 @@ export default class CombatSystem {
 
         if (entity.userData.hp <= 0) {
             audio.die();
+            state.addShake(0.08); // subtle punch on a creature/golem kill
             for (let i = 0; i < 20; i++) {
                 factory.createParticle(entity.position.clone(), entity.userData.color || new THREE.Color(0xff0000), 1.5);
             }
@@ -263,6 +264,7 @@ export default class CombatSystem {
 
         state.player.hp -= amount;
         audio.hurt();
+        state.addShake(0.15);
 
         // Knockback along surface
         if (sourcePos) {

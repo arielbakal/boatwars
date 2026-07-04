@@ -584,9 +584,17 @@ export default class BoatSystem {
                     // damage the hull, scaled so a full-speed head-on hit costs
                     // ~SHIP_COLLISION_DAMAGE_AT_FULL_SPEED HP. The ship is never destroyed.
                     const impactSpeed = Math.abs(stats.currentSpeed);
+                    // Camera shake scales with impact speed too — a full-speed head-on
+                    // hit shakes about as hard as addShake()'s clamp allows (~0.3).
+                    state.addShake((impactSpeed / stats.maxSpeed) * 0.3);
                     if (impactSpeed > stats.maxSpeed * SHIP_COLLISION_DAMAGE_THRESHOLD) {
                         const dmg = (impactSpeed / stats.maxSpeed) * SHIP_COLLISION_DAMAGE_AT_FULL_SPEED;
                         stats.health = Math.max(1, stats.health - dmg);
+                        // Impact sparks at the actual contact point on the planet surface.
+                        const contactPoint = p.center.clone().addScaledVector(normal, p.radius);
+                        for (let i = 0; i < 12; i++) {
+                            factory.createParticle(contactPoint.clone(), new THREE.Color(0xffaa33), 1.0);
+                        }
                     }
                     stats.currentSpeed *= -0.3; // small bounce back
                 }
@@ -692,6 +700,7 @@ export default class BoatSystem {
             const lookTarget = cockpitPos.clone().addScaledVector(shipForward, 10);
 
             camera.position.lerp(cockpitPos, smoothFactor(0.15, dt));
+            this._applyCameraShake(state, camera);
             camera.lookAt(lookTarget);
 
             // Hide player model in cockpit
@@ -723,9 +732,24 @@ export default class BoatSystem {
 
             if (!isNaN(desiredPos.x) && !isNaN(desiredPos.y) && !isNaN(desiredPos.z)) {
                 camera.position.lerp(desiredPos, smoothFactor(0.08, dt));
+                this._applyCameraShake(state, camera);
                 camera.lookAt(boat.position);
             }
         }
+    }
+
+    /**
+     * Apply the current camera-shake magnitude (state.cameraShake, decayed each
+     * frame by ParticleSystem) as a small random offset to the camera's FINAL
+     * position, after the position lerp/copy and before lookAt() — mirrors
+     * PlayerController._applyCameraShake for the on-foot cameras.
+     */
+    _applyCameraShake(state, camera) {
+        const shake = state.cameraShake;
+        if (!shake) return;
+        camera.position.x += (Math.random() - 0.5) * 2 * shake;
+        camera.position.y += (Math.random() - 0.5) * 2 * shake;
+        camera.position.z += (Math.random() - 0.5) * 2 * shake;
     }
 
     // ===========================================

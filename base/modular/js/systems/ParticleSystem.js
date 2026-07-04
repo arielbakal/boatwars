@@ -9,6 +9,12 @@ export default class ParticleSystem {
     update(dt, context) {
         const { state, world, factory } = context;
 
+        // Camera shake decay — fast exponential decay toward 0, frame-rate independent.
+        if (state.cameraShake > 0) {
+            state.cameraShake *= Math.pow(0.001, dt);
+            if (state.cameraShake < 0.001) state.cameraShake = 0;
+        }
+
         // Particles
         for (let i = state.particles.length - 1; i >= 0; i--) {
             const p = state.particles[i];
