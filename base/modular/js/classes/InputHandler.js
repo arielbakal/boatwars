@@ -285,6 +285,12 @@ export default class InputHandler {
             if (!document.pointerLockElement) return;
             if (state.isOnBoat) return;
             if (state.isDead) return;
+            // The scripted boarding walk drives player.pos itself (BoatSystem.
+            // updateBoardingAnimation) — updateInteraction() also doesn't run during
+            // it, so interactionTarget/chop/mine state is stale and tryAttack would
+            // read a crosshair that isn't actually pointed anywhere meaningful
+            // (invisible, misaimed attacks reported during the walk).
+            if (state.isBoardingBoat) return;
 
             const selectedType = this.getSelectedType();
 
@@ -739,10 +745,27 @@ export default class InputHandler {
         }
     }
 
+    /**
+     * Toggle the highlight glow on an interactable entity. Saves each child's
+     * original emissive hex the first time it's highlighted and restores it on
+     * unhighlight (mirrors CombatSystem._flashEntity's save/restore pattern) — a
+     * flat 0x000000 reset would otherwise permanently kill a legitimately
+     * emissive material, e.g. gold ore's 0xffd700 glow, the first time it's
+     * highlighted and released.
+     */
     setHighlight(entity, on) {
         entity.traverse(child => {
             if (child.material && child.material.emissive) {
-                child.material.emissive.setHex(on ? 0x222222 : 0x000000);
+                if (on) {
+                    if (child.userData._origEmissive === undefined) {
+                        child.userData._origEmissive = child.material.emissive.getHex();
+                    }
+                    child.material.emissive.setHex(0x222222);
+                } else {
+                    const orig = child.userData._origEmissive;
+                    child.material.emissive.setHex(orig !== undefined ? orig : 0x000000);
+                    delete child.userData._origEmissive;
+                }
             }
         });
     }

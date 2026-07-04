@@ -225,6 +225,21 @@ export default class BoatSystem {
         const { state, playerController: pc, camera } = context;
         if (!state.isBoardingBoat || !state.boardingTargetBoat) return;
 
+        if (state.isDead) {
+            // Dying mid-board-walk: cancel boarding so this scripted lerp can't
+            // fight the respawn teleport CombatSystem._updateDeathRespawn applies
+            // to state.player.pos every frame while isDead.
+            state.isBoardingBoat = false;
+            state.boardingTargetBoat = null;
+            state.boardingProgress = 0;
+            state.boardingPhase = 0;
+            state.boardingStartPos = null;
+            // Restore body visibility per the normal on-foot (FP/TP) rule — boarding
+            // forces it fully visible regardless of camera mode (see boardBoat()).
+            if (pc) pc.setBodyVisible(state.player.cameraMode !== 'first');
+            return;
+        }
+
         const boat = state.boardingTargetBoat;
         const player = state.player;
 
