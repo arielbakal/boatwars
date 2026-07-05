@@ -36,6 +36,10 @@ export default class GameEngine {
         this.playerController = new PlayerController(this.world, this.state);
         this.spheres = [];
         this.islandGroups = [];
+        // Atmosphere shells tracked separately from islandGroups so animate() can
+        // cheaply loop just the ≤5 fresnel meshes each frame to drive their uFade
+        // uniform (see createPlanet/_trackAtmosphere) without walking every planet.
+        this.atmosphereMeshes = [];
         this.groundPlanes = [];
         this.waterMesh = null;
         this.logs = [];
@@ -224,6 +228,9 @@ export default class GameEngine {
             this.factory.disposeHierarchy(ig.group);
         });
         this.islandGroups = [];
+        // Rebuilt from scratch by initGame() below (via _trackAtmosphere) — clearing
+        // here avoids fading stale meshes whose planet no longer exists.
+        this.atmosphereMeshes = [];
         this.groundPlanes = [];
         this.state.islands = [];
         this.logs = [];
@@ -298,6 +305,20 @@ export default class GameEngine {
         entity.userData.planet = planet;
     }
 
+    /**
+     * Record a planet's atmosphere shell (if any) for the per-frame uFade update
+     * in animate(). Call once right after each createPlanet() + islandGroups.push().
+     */
+    _trackAtmosphere(planet) {
+        if (planet.atmosphere) {
+            this.atmosphereMeshes.push({
+                mesh: planet.atmosphere.mesh,
+                center: planet.center,
+                shellRadius: planet.atmosphere.shellRadius
+            });
+        }
+    }
+
     initGame(sphereColor) {
         let seededOverride = null;
         if (this.network && this.network.worldSeed !== null) {
@@ -329,6 +350,7 @@ export default class GameEngine {
         const planet1 = this.factory.createPlanet(this.state.palette, 0, 0, 0, 15, PLANETS[0].hasAtmosphere);
         this.world.add(planet1.group);
         this.islandGroups.push(planet1);
+        this._trackAtmosphere(planet1);
         this.groundPlanes.push(planet1.groundMesh);
         this.state.islands.push({
             center: planet1.center.clone(),
@@ -406,6 +428,7 @@ export default class GameEngine {
         const planet2 = this.factory.createPlanet(palette2, 100, 30, 0, 18, PLANETS[1].hasAtmosphere);
         this.world.add(planet2.group);
         this.islandGroups.push(planet2);
+        this._trackAtmosphere(planet2);
         this.groundPlanes.push(planet2.groundMesh);
         this.state.islands.push({
             center: planet2.center.clone(),
@@ -470,6 +493,7 @@ export default class GameEngine {
         const planet3 = this.factory.createPlanet(palette3, 0, -20, 140, 30, PLANETS[2].hasAtmosphere);
         this.world.add(planet3.group);
         this.islandGroups.push(planet3);
+        this._trackAtmosphere(planet3);
         this.groundPlanes.push(planet3.groundMesh);
         this.state.islands.push({
             center: planet3.center.clone(),
@@ -558,6 +582,7 @@ export default class GameEngine {
         const planet4 = this.factory.createPlanet(palette4, -110, 40, -60, 14, PLANETS[3].hasAtmosphere);
         this.world.add(planet4.group);
         this.islandGroups.push(planet4);
+        this._trackAtmosphere(planet4);
         this.groundPlanes.push(planet4.groundMesh);
         this.state.islands.push({
             center: planet4.center.clone(),
@@ -616,6 +641,7 @@ export default class GameEngine {
         const planet5 = this.factory.createPlanet(palette5, 60, -50, -120, 16, PLANETS[4].hasAtmosphere);
         this.world.add(planet5.group);
         this.islandGroups.push(planet5);
+        this._trackAtmosphere(planet5);
         this.groundPlanes.push(planet5.groundMesh);
         this.state.islands.push({
             center: planet5.center.clone(),
@@ -1108,6 +1134,19 @@ export default class GameEngine {
         if (state.phase === 'playing') {
             // No water animation in space
             // No cloud animation in space
+
+            // Fade atmosphere shells by camera distance. The BackSide shell wraps
+            // the whole planet, so standing on the surface puts the camera INSIDE
+            // it — the far wall then fills the entire view and the additive
+            // fresnel term washes the screen toward white. uFade goes 0 at/inside
+            // the shell radius, 1 by 2.5x the shell radius, so it's invisible from
+            // the ground and fully readable as a rim glow once out in space. Cheap
+            // loop: at most 5 atmosphere meshes exist across all planets.
+            for (const a of this.atmosphereMeshes) {
+                const camDist = camera.position.distanceTo(a.center);
+                const fade = THREE.MathUtils.clamp((camDist - a.shellRadius) / (a.shellRadius * 1.5), 0, 1);
+                a.mesh.material.uniforms.uFade.value = fade;
+            }
 
             // Build shared context for all systems
             const ctx = {

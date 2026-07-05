@@ -426,6 +426,12 @@ export default class EntityFactory {
         // extra Math.random() calls — keeps this independent of RNG order).
         // ShaderMaterial doesn't react to scene fog by default, which is what
         // we want for a glow shell (see WorldManager's space fog).
+        // Populated below when hasAtmosphere — surfaced on the return value so
+        // the caller (GameEngine) can track {mesh, shellRadius} per planet and
+        // fade uFade by camera distance each frame (see animate()). Kept null
+        // otherwise so callers can cheaply skip planets with no atmosphere.
+        let atmosphereInfo = null;
+
         if (hasAtmosphere) {
             const atmosScale = 1.06 + Math.abs(Math.sin(seed * 0.5)) * 0.04; // 1.06-1.10x radius
             // The fresnel rim glow below is entirely per-fragment (rim = f(vNormal,
@@ -435,11 +441,21 @@ export default class EntityFactory {
             // tris — same smooth rim at this render scale, ~1/64th the geometry.
             const atmosGeo = new THREE.IcosahedronGeometry(radius * atmosScale, 2);
             const atmosColor = palette.background.clone().lerp(palette.accent, 0.35);
-            const atmosIntensity = 0.9 + Math.abs(Math.sin(seed * 1.7)) * 0.4; // 0.9-1.3
+            // Tightened from the original 0.9-1.3: from inside the BackSide shell
+            // (standing on the surface) the far wall fills the whole sky, so even
+            // a "moderate" intensity read as a flat white veil before uFade existed.
+            // uFade now hides that case entirely, but the from-space rim itself was
+            // also a bit hot — trimmed the ceiling so the glow stays a rim accent,
+            // not a wash, once fully faded in.
+            const atmosIntensity = 0.7 + Math.abs(Math.sin(seed * 1.7)) * 0.3; // 0.7-1.0
             const atmosMat = new THREE.ShaderMaterial({
                 uniforms: {
                     color: { value: atmosColor },
-                    intensity: { value: atmosIntensity }
+                    intensity: { value: atmosIntensity },
+                    // Distance-based fade so the shell is invisible from inside
+                    // (standing on the surface) and full-strength from space —
+                    // see GameEngine.animate(), which drives this per frame.
+                    uFade: { value: 1.0 }
                 },
                 vertexShader: `
                     varying vec3 vNormal;
@@ -454,11 +470,15 @@ export default class EntityFactory {
                 fragmentShader: `
                     uniform vec3 color;
                     uniform float intensity;
+                    uniform float uFade;
                     varying vec3 vNormal;
                     varying vec3 vViewDir;
                     void main() {
+                        // Tightened from pow(rim, 2.5): a steeper falloff keeps the glow
+                        // hugging the silhouette edge instead of reading as a hot dome
+                        // once uFade is at full strength in deep space.
                         float rim = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
-                        float glow = pow(rim, 2.5) * intensity;
+                        float glow = pow(rim, 3.5) * intensity * uFade;
                         gl_FragColor = vec4(color, glow);
                     }
                 `,
@@ -469,6 +489,7 @@ export default class EntityFactory {
             });
             const atmos = new THREE.Mesh(atmosGeo, atmosMat);
             g.add(atmos);
+            atmosphereInfo = { mesh: atmos, shellRadius: radius * atmosScale };
         }
 
         g.position.set(cx, cy, cz);
@@ -477,7 +498,8 @@ export default class EntityFactory {
             group: g,
             groundMesh: surface,
             center: new THREE.Vector3(cx, cy, cz),
-            radius: radius
+            radius: radius,
+            atmosphere: atmosphereInfo
         };
     }
 
