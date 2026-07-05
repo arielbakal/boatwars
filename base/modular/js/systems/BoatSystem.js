@@ -365,6 +365,23 @@ export default class BoatSystem {
      * Y-up aligns with the surface normal, heading (current forward) is preserved
      * by projecting it onto the tangent plane. Keeps the ship from pitching into
      * the ground or pointing nose-up during taxi.
+     *
+     * Root-cause fix (boarding jitter): SphericalUtils.getOrientationOnSurface's
+     * `forwardHint` becomes the RESULT quaternion's local +Z axis (see its
+     * makeBasis(right, up, forward) call), but this ship's flight code treats
+     * local -Z as "forward" everywhere else (shipForward, thrust, cockpit look
+     * direction). Hinting with local -Z here fed the ship's real forward in as
+     * if it were local +Z, so every call built a target rotated 180° about the
+     * surface normal from the ship's actual current orientation. Re-leveling
+     * every frame therefore slerped toward an exactly-antipodal target — the
+     * quaternion slerp singularity at theta=PI (shortest-path axis undefined) —
+     * producing chaotic per-frame orientation noise while grounded. Position was
+     * unaffected (rest-altitude snap and the player's Y-offset are parallel to
+     * the rotation axis), but the chase camera's horizontal orbit basis
+     * (shipBack, tangent to that axis) inherited the full jitter, read by
+     * players as "the ship trembles the moment I board." Passing local +Z
+     * (shipBack) instead matches getOrientationOnSurface's actual contract and
+     * makes this a stable fixed point once level.
      */
     _levelToSurface(state, boat, dt) {
         const planet = state.shipNearestPlanet;
@@ -372,7 +389,7 @@ export default class BoatSystem {
         const q = state.shipQuaternion;
 
         const normal = _tmpVec.copy(boat.position).sub(planet.center).normalize();
-        const forward = _tmpVec2.set(0, 0, -1).applyQuaternion(q).normalize();
+        const forward = _tmpVec2.set(0, 0, 1).applyQuaternion(q).normalize();
         const target = SphericalUtils.getOrientationOnSurface(normal, forward);
         q.slerp(target, smoothFactor(SHIP_AUTO_LEVEL_SPEED, dt)).normalize();
     }
