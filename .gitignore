@@ -15,5 +15,5 @@ Thumbs.db
 base/modular/js/config.local.js
 
 # Local tooling (agent / editor session state)
-.atl/
+.atl/claude
 .claude/
