@@ -129,6 +129,11 @@ export default class EntityFactory {
      * This ensures adjacent triangles share edge vertices and stay connected.
      */
     mergeVertices(geometry, tolerance = 0.0001) {
+        // Indexed geometries (Cone, Box, Sphere...) must be expanded first:
+        // the loop below reads vertices as a triangle soup, so feeding it an
+        // indexed geometry would rebuild the index from dedup order and draw
+        // garbage triangles.
+        if (geometry.index !== null) geometry = geometry.toNonIndexed();
         const pos = geometry.attributes.position;
         const map = {};          // hash → first-seen index
         const uniquePos = [];    // unique vertex positions [x,y,z,...]
