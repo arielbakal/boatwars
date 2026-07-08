@@ -530,6 +530,12 @@ export default class InputHandler {
         if (it.type === 'flower') ent = factory.createFlower(state.palette, 0, 0, it.style);
         if (it.type === 'wood' || it.type === 'log') {
             ent = factory.createLog(it.color, 0, 0);
+            // Deliberately placed logs must not magnetize back into the
+            // inventory (createLog stamps autoPickup for tree drops) — the
+            // place/re-pickup loop made the hotbar count bounce +1 forever and
+            // made ship-log clusters impossible to lay down near the player.
+            // Misplaced logs can still be collected by clicking them.
+            ent.userData.autoPickup = false;
             this.engine.logs.push(ent);
         }
         if (it.type === 'creature') {

@@ -1073,6 +1073,10 @@ export default class GameEngine {
                 const pos = new THREE.Vector3(event.x, event.y || 0, event.z);
                 const color = new THREE.Color(event.colorHex !== undefined ? event.colorHex : 0x8B4513);
                 const log = this.factory.createLog(color, 0, 0);
+                // A remote player's construction log must not magnetize into
+                // THIS client's inventory (mirrors the placed-log exclusion in
+                // InputHandler.createEntityFromItem).
+                log.userData.autoPickup = false;
                 log.position.copy(pos);
                 const result = SphericalUtils.findNearestPlanet(pos, this.state.islands);
                 if (result && result.planet) {
