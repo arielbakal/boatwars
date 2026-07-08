@@ -177,7 +177,11 @@ export default class CombatSystem {
         }
         entity.userData._knockTimer = 0.07; // ~4 frames at 60fps
 
-        entity.userData.aggroTimer = CREATURE_AGGRO_DURATION;
+        // Friendly fauna (starting planet) never retaliates — it just gets
+        // knocked back and, if killed, still drops its essence.
+        if (!entity.userData.friendly) {
+            entity.userData.aggroTimer = CREATURE_AGGRO_DURATION;
+        }
 
         for (let i = 0; i < 6; i++) {
             factory.createParticle(entity.position.clone(), entity.userData.color || new THREE.Color(0xff0000), 0.8);

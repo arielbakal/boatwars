@@ -339,11 +339,41 @@ export default class GameEngine {
         // Space background stays dark
         this.ui.invContainer.style.display = 'flex';
 
-        // Helper: random surface point near a planet center
+        // Helper: random surface point near the spawn pole. Kept ONLY for
+        // things the player must find early (chief, tools, golem) — using it
+        // for dressing was a legacy of flat-island generation that clustered
+        // every prop in a small cap and left the rest of each planet barren.
         const rndSurface = (planet, minDist = 1.0, maxDist = null) => {
             if (!maxDist) maxDist = planet.radius * 0.8;
             const centerSurface = planet.center.clone().add(new THREE.Vector3(0, planet.radius, 0));
             return SphericalUtils.randomSurfacePointNear(planet, centerSurface, minDist, maxDist);
+        };
+        // Full-sphere scatter — dressing goes everywhere on the planet.
+        const rndAnywhere = (planet) => SphericalUtils.randomSurfacePoint(planet, Math.PI);
+        // Same, but rejecting points within poleClearance (surface distance) of
+        // the top pole — planet 3's mountain owns that cap. Deterministic under
+        // the seeded RNG: same seed → same rolls → same rejections everywhere.
+        const rndAnywhereClear = (planet, poleClearance) => {
+            const pole = planet.center.clone().add(new THREE.Vector3(0, planet.radius, 0));
+            let p = rndAnywhere(planet);
+            for (let g = 0; g < 20 && SphericalUtils.isWithinSurfaceRange(p, pole, planet, poleClearance); g++) {
+                p = rndAnywhere(planet);
+            }
+            return p;
+        };
+        // Organic dressing: cluster seeds anywhere on the sphere, members in a
+        // tight arc around each seed — groves and patches instead of uniform
+        // confetti. Returns clusters*perCluster positions.
+        const clusterPoints = (planet, clusters, perCluster, spread, poleClearance = 0) => {
+            const pts = [];
+            for (let c = 0; c < clusters; c++) {
+                const seed = poleClearance ? rndAnywhereClear(planet, poleClearance) : rndAnywhere(planet);
+                pts.push(seed);
+                for (let m = 1; m < perCluster; m++) {
+                    pts.push(SphericalUtils.randomSurfacePointNear(planet, seed, 0.6, spread));
+                }
+            }
+            return pts;
         };
 
         // --- Planet 1: Starting Planet ---
@@ -363,53 +393,52 @@ export default class GameEngine {
         // C1: fresh world DNA for planet 1's flora/fauna shapes
         const planetDNA1 = this.factory.generateWorldDNA();
 
-        // Trees on planet 1
-        for (let i = 0; i < 14; i++) {
-            const pos = rndSurface(planet1, 2.0, 12.0);
+        // Trees on planet 1 — groves across the whole sphere
+        for (const pos of clusterPoints(planet1, 8, 3, 2.5)) {
             const tree = this.factory.createTree(this.state.palette, 0, 0, this._treeStyleFromDNA(planetDNA1, this.state.palette));
             this.placeOnPlanet(tree, planet1, pos);
             this.state.entities.push(tree);
             this.world.add(tree);
         }
         // Bushes
-        for (let i = 0; i < 7; i++) {
-            const pos = rndSurface(planet1, 1.5, 12.0);
+        for (const pos of clusterPoints(planet1, 6, 2, 2.0)) {
             const e = this.factory.createBush(this.state.palette, 0, 0, this._bushStyleFromDNA(planetDNA1, this.state.palette));
             this.placeOnPlanet(e, planet1, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         // Rocks
-        for (let i = 0; i < 5; i++) {
-            const pos = rndSurface(planet1, 1.5, 12.0);
+        for (const pos of clusterPoints(planet1, 5, 2, 1.8)) {
             const e = this.factory.createRock(this.state.palette, 0, 0, this._rockStyleFromDNA(planetDNA1, this.state.palette));
             this.placeOnPlanet(e, planet1, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         // Grass
-        for (let i = 0; i < 30; i++) {
-            const pos = rndSurface(planet1, 0.5, 13.0);
+        for (const pos of clusterPoints(planet1, 14, 5, 2.2)) {
             const e = this.factory.createGrass(this.state.palette, 0, 0, this._grassStyleFromDNA(planetDNA1, this.state.palette));
             this.placeOnPlanet(e, planet1, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         // Flowers
-        for (let i = 0; i < 8; i++) {
-            const pos = rndSurface(planet1, 1.0, 12.0);
+        for (const pos of clusterPoints(planet1, 6, 3, 1.5)) {
             const e = this.factory.createFlower(this.state.palette, 0, 0);
             this.placeOnPlanet(e, planet1, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        // Creatures on planet 1
+        // Creatures on planet 1 — friendly fauna only: the starting planet is
+        // the tutorial space, so its creatures never aggro (no ambient
+        // hostility, no retaliation when attacked — see the friendly guards in
+        // EntityAISystem.updateCreature and CombatSystem._damageEntity).
         const speciesTypes = ['blobby', 'blocky', 'conehead'];
-        for (let i = 0; i < 3; i++) {
-            const pos = rndSurface(planet1, 2.0, 9.0);
-            const creatureDNA = this.factory.generateCreatureDNA(this.state.palette, speciesTypes[i]);
+        for (let i = 0; i < 5; i++) {
+            const pos = rndAnywhere(planet1);
+            const creatureDNA = this.factory.generateCreatureDNA(this.state.palette, speciesTypes[i % speciesTypes.length]);
             const c = this.factory.createCreature(this.state.palette, 0, 0, creatureDNA);
             this.placeOnPlanet(c, planet1, pos);
             c.userData.boundCenter = planet1.center.clone();
             c.userData.boundRadius = planet1.radius * 0.85;
             c.userData.planet = planet1;
             this._applyTier(c, 0); // constants.PLANETS[0] STARTING PLANET
+            c.userData.friendly = true;
             this.state.entities.push(c); this.world.add(c);
         }
         // Chief
@@ -446,32 +475,27 @@ export default class GameEngine {
         // C1: fresh world DNA for planet 2's flora/fauna shapes
         const planetDNA2 = this.factory.generateWorldDNA();
 
-        for (let i = 0; i < 18; i++) {
-            const pos = rndSurface(planet2, 2.0, 14.0);
+        for (const pos of clusterPoints(planet2, 10, 3, 2.5)) {
             const e = this.factory.createTree(palette2, 0, 0, this._treeStyleFromDNA(planetDNA2, palette2));
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 12; i++) {
-            const pos = rndSurface(planet2, 1.5, 14.0);
+        for (const pos of clusterPoints(planet2, 8, 2, 2.0)) {
             const e = this.factory.createBush(palette2, 0, 0, this._bushStyleFromDNA(planetDNA2, palette2));
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 4; i++) {
-            const pos = rndSurface(planet2, 1.5, 14.0);
+        for (const pos of clusterPoints(planet2, 4, 2, 1.8)) {
             const e = this.factory.createRock(palette2, 0, 0, this._rockStyleFromDNA(planetDNA2, palette2));
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 20; i++) {
-            const pos = rndSurface(planet2, 0.5, 15.0);
+        for (const pos of clusterPoints(planet2, 12, 5, 2.2)) {
             const e = this.factory.createGrass(palette2, 0, 0, this._grassStyleFromDNA(planetDNA2, palette2));
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 6; i++) {
-            const pos = rndSurface(planet2, 1.0, 14.0);
+        for (const pos of clusterPoints(planet2, 8, 3, 1.5)) {
             const e = this.factory.createFlower(palette2, 0, 0);
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
@@ -483,7 +507,7 @@ export default class GameEngine {
         this.state.entities.push(pickaxe); this.world.add(pickaxe);
         // Creatures on planet 2
         for (let i = 0; i < 3; i++) {
-            const pos = rndSurface(planet2, 2.0, 12.0);
+            const pos = rndAnywhere(planet2);
             const creatureDNA = this.factory.generateCreatureDNA(palette2, speciesTypes[i]);
             const c = this.factory.createCreature(palette2, 0, 0, creatureDNA);
             this.placeOnPlanet(c, planet2, pos);
@@ -524,9 +548,8 @@ export default class GameEngine {
         const golem = this.factory.createStoneGolem(palette3, 0, 0);
         this.placeOnPlanet(golem, planet3, golemPos);
         this.world.add(golem); this.state.entities.push(golem);
-        // Big rocks on planet 3 edges
-        for (let i = 0; i < 8; i++) {
-            const pos = rndSurface(planet3, 18.0, 26.0);
+        // Big rocks on planet 3 — anywhere except the mountain's footprint
+        for (const pos of clusterPoints(planet3, 5, 2, 2.5, 17)) {
             const rock = this.factory.createRock(palette3, 0, 0, this._rockStyleFromDNA(planetDNA3, palette3));
             this.placeOnPlanet(rock, planet3, pos);
             rock.scale.set(3, 3, 3);
@@ -534,35 +557,32 @@ export default class GameEngine {
             this.state.obstacles.push(rock);
         }
         // Gold rocks on planet 3
-        for (let i = 0; i < 12; i++) {
-            const pos = rndSurface(planet3, 22.0, 27.0);
+        for (let i = 0; i < 14; i++) {
+            const pos = rndAnywhereClear(planet3, 17);
             const scale = (2.5 + Math.random() * 1.5) * 0.2;
             const goldRock = this.factory.createGoldRock(palette3, 0, 0, scale);
             this.placeOnPlanet(goldRock, planet3, pos);
             this.state.entities.push(goldRock); this.world.add(goldRock);
         }
         // Vegetation on planet 3
-        for (let i = 0; i < 10; i++) {
-            const pos = rndSurface(planet3, 17.0, 26.0);
+        for (const pos of clusterPoints(planet3, 8, 2, 2.5, 17)) {
             const e = this.factory.createTree(palette3, 0, 0, this._treeStyleFromDNA(planetDNA3, palette3));
             this.placeOnPlanet(e, planet3, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 40; i++) {
-            const pos = rndSurface(planet3, 17.0, 27.0);
+        for (const pos of clusterPoints(planet3, 12, 5, 2.2, 17)) {
             const e = this.factory.createGrass(palette3, 0, 0, this._grassStyleFromDNA(planetDNA3, palette3));
             this.placeOnPlanet(e, planet3, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 12; i++) {
-            const pos = rndSurface(planet3, 17.0, 22.0);
+        for (const pos of clusterPoints(planet3, 5, 3, 1.5, 17)) {
             const e = this.factory.createFlower(palette3, 0, 0);
             this.placeOnPlanet(e, planet3, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         // Creatures on planet 3
         for (let i = 0; i < 3; i++) {
-            const pos = rndSurface(planet3, 17.0, 24.0);
+            const pos = rndAnywhereClear(planet3, 17);
             const creatureDNA = this.factory.generateCreatureDNA(palette3, speciesTypes[i]);
             const c = this.factory.createCreature(palette3, 0, 0, creatureDNA);
             this.placeOnPlanet(c, planet3, pos);
@@ -573,7 +593,7 @@ export default class GameEngine {
             this.state.entities.push(c); this.world.add(c);
         }
         for (let i = 0; i < 2; i++) {
-            const pos = rndSurface(planet3, 17.0, 24.0);
+            const pos = rndAnywhereClear(planet3, 17);
             const c = this.factory.createCreature(palette3, 0, 0, this._creatureStyleFromDNA(planetDNA3, palette3));
             this.placeOnPlanet(c, planet3, pos);
             c.userData.boundCenter = planet3.center.clone();
@@ -600,38 +620,34 @@ export default class GameEngine {
         // C1: fresh world DNA for planet 4's flora/fauna shapes
         const planetDNA4 = this.factory.generateWorldDNA();
 
-        for (let i = 0; i < 4; i++) {
-            const pos = rndSurface(planet4, 2.0, 10.0);
+        for (const pos of clusterPoints(planet4, 4, 2, 2.2)) {
             const e = this.factory.createTree(palette4, 0, 0, this._treeStyleFromDNA(planetDNA4, palette4));
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 3; i++) {
-            const pos = rndSurface(planet4, 1.5, 10.0);
+        for (const pos of clusterPoints(planet4, 3, 2, 2.0)) {
             const e = this.factory.createBush(palette4, 0, 0, this._bushStyleFromDNA(planetDNA4, palette4));
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 3; i++) {
-            const pos = rndSurface(planet4, 1.5, 10.0);
+        // Rocky Outpost — rocks are its identity, give it plenty
+        for (const pos of clusterPoints(planet4, 6, 2, 1.8)) {
             const e = this.factory.createRock(palette4, 0, 0, this._rockStyleFromDNA(planetDNA4, palette4));
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 12; i++) {
-            const pos = rndSurface(planet4, 0.5, 11.0);
+        for (const pos of clusterPoints(planet4, 8, 4, 2.0)) {
             const e = this.factory.createGrass(palette4, 0, 0, this._grassStyleFromDNA(planetDNA4, palette4));
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 4; i++) {
-            const pos = rndSurface(planet4, 1.0, 10.0);
+        for (const pos of clusterPoints(planet4, 4, 2, 1.5)) {
             const e = this.factory.createFlower(palette4, 0, 0);
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         for (let i = 0; i < 3; i++) {
-            const pos = rndSurface(planet4, 2.0, 8.0);
+            const pos = rndAnywhere(planet4);
             const creatureDNA = this.factory.generateCreatureDNA(palette4, speciesTypes[i]);
             const c = this.factory.createCreature(palette4, 0, 0, creatureDNA);
             this.placeOnPlanet(c, planet4, pos);
@@ -659,38 +675,33 @@ export default class GameEngine {
         // C1: fresh world DNA for planet 5's flora/fauna shapes
         const planetDNA5 = this.factory.generateWorldDNA();
 
-        for (let i = 0; i < 5; i++) {
-            const pos = rndSurface(planet5, 2.0, 12.0);
+        for (const pos of clusterPoints(planet5, 5, 2, 2.2)) {
             const e = this.factory.createTree(palette5, 0, 0, this._treeStyleFromDNA(planetDNA5, palette5));
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 4; i++) {
-            const pos = rndSurface(planet5, 1.5, 12.0);
+        for (const pos of clusterPoints(planet5, 4, 2, 2.0)) {
             const e = this.factory.createBush(palette5, 0, 0, this._bushStyleFromDNA(planetDNA5, palette5));
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 4; i++) {
-            const pos = rndSurface(planet5, 1.5, 12.0);
+        for (const pos of clusterPoints(planet5, 4, 2, 1.8)) {
             const e = this.factory.createRock(palette5, 0, 0, this._rockStyleFromDNA(planetDNA5, palette5));
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 18; i++) {
-            const pos = rndSurface(planet5, 0.5, 13.0);
+        for (const pos of clusterPoints(planet5, 10, 4, 2.0)) {
             const e = this.factory.createGrass(palette5, 0, 0, this._grassStyleFromDNA(planetDNA5, palette5));
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (let i = 0; i < 5; i++) {
-            const pos = rndSurface(planet5, 1.0, 12.0);
+        for (const pos of clusterPoints(planet5, 5, 2, 1.5)) {
             const e = this.factory.createFlower(palette5, 0, 0);
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         for (let i = 0; i < 3; i++) {
-            const pos = rndSurface(planet5, 2.0, 10.0);
+            const pos = rndAnywhere(planet5);
             const creatureDNA = this.factory.generateCreatureDNA(palette5, speciesTypes[i]);
             const c = this.factory.createCreature(palette5, 0, 0, creatureDNA);
             this.placeOnPlanet(c, planet5, pos);

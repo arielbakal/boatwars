@@ -414,7 +414,11 @@ export default class EntityFactory {
 
         // Surface (grass) layer - the main collision surface
         const surfaceGeoRaw = new THREE.IcosahedronGeometry(radius, detail);
-        const surfaceGeo = this.distortGeometryFBM(surfaceGeoRaw, planetSeed + 3, radius * 0.011);
+        // 0.016 (was 0.011): slightly stronger relief so planets read as rolling
+        // terrain instead of near-perfect spheres. Safe for gameplay — player,
+        // creature, and prop placement all sample the real displaced mesh via
+        // SphericalUtils.sampleTerrainHeight, not the nominal radius.
+        const surfaceGeo = this.distortGeometryFBM(surfaceGeoRaw, planetSeed + 3, radius * 0.016);
         const surface = new THREE.Mesh(surfaceGeo, surfaceMat);
         surface.userData = { type: 'ground' };
         g.add(surface);

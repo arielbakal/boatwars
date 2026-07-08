@@ -203,7 +203,7 @@ export default class EntityAISystem {
         // lingers nearby, reusing the same aggroTimer that _damageEntity sets on hit.
         // AGGRO_RANGE (6) is tiny next to the gap between any two planets, so the
         // distance check alone keeps this planet-local without an explicit planet match.
-        if ((!e.userData.aggroTimer || e.userData.aggroTimer <= 0) && !state.isDead && state.invincibleTimer <= 0) {
+        if (!e.userData.friendly && (!e.userData.aggroTimer || e.userData.aggroTimer <= 0) && !state.isDead && state.invincibleTimer <= 0) {
             const distToPlayer = e.position.distanceTo(state.player.pos);
             if (distToPlayer < AGGRO_RANGE) {
                 const temperament = e.userData.temperament !== undefined ? e.userData.temperament : 1.0;
@@ -242,6 +242,7 @@ export default class EntityAISystem {
                     egg.userData.parentTierHpMult = e.userData.tierHpMult;
                     egg.userData.parentContactDamage = e.userData.contactDamage;
                     egg.userData.parentAggroMult = e.userData.aggroMult;
+                    egg.userData.parentFriendly = !!e.userData.friendly;
                     state.entities.push(egg);
                     world.add(egg);
                 }
@@ -359,6 +360,8 @@ export default class EntityAISystem {
             }
             if (e.userData.parentContactDamage !== undefined) baby.userData.contactDamage = e.userData.parentContactDamage;
             if (e.userData.parentAggroMult !== undefined) baby.userData.aggroMult = e.userData.parentAggroMult;
+            // Starting-planet fauna stays friendly across generations
+            if (e.userData.parentFriendly) baby.userData.friendly = true;
             if (e.userData.planet) {
                 baby.userData.boundCenter = e.userData.planet.center.clone();
                 baby.userData.boundRadius = e.userData.planet.radius * 0.85;
