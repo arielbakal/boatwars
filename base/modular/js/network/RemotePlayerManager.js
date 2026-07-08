@@ -10,6 +10,7 @@ import { SHIP_MAX_SPEED, ATTACK_SWING_DURATION, HIT_INTERVAL } from '../constant
 // (mirrors the _tmpVec convention in BoatSystem.js).
 const _tmpAvatarQuat = new THREE.Quaternion();
 const _tmpAvatarAxis = new THREE.Vector3(0, 1, 0);
+const _tmpAvatarUp = new THREE.Vector3(0, 1, 0);
 const _tmpShipDelta = new THREE.Vector3();
 const _tmpShipForward = new THREE.Vector3(0, 0, -1);
 const _tmpShipUp = new THREE.Vector3(0, 1, 0);
@@ -545,14 +546,28 @@ export default class RemotePlayerManager {
             p.currentPos.lerp(p.targetPos, smoothFactor(0.15, dt));
             p.group.position.copy(p.currentPos);
 
-            // Smooth rotation
+            // Body orientation: align the group's local Y-up with the planet
+            // surface normal, in the canonical tangent frame (arbitrary-tangent
+            // forward) that the sender measured `rotation` against — mirroring
+            // the local player's playerGroup/modelPivot split so the body
+            // follows the planet curvature instead of staying world-upright.
+            if (islands && islands.length) {
+                const nearest = SphericalUtils.findNearestPlanet(p.currentPos, islands);
+                if (nearest && nearest.distance < nearest.planet.radius * 2.5) {
+                    _tmpAvatarUp.copy(p.currentPos).sub(nearest.planet.center).normalize();
+                    const frameQ = SphericalUtils.getOrientationOnSurface(_tmpAvatarUp, null);
+                    p.group.quaternion.slerp(frameQ, smoothFactor(0.15, dt));
+                }
+            }
+
+            // Smooth rotation — local yaw inside the group's surface frame
             const targetQ = _tmpAvatarQuat.setFromAxisAngle(_tmpAvatarAxis, p.targetRot);
             p.pivot.quaternion.slerp(targetQ, smoothFactor(0.15, dt));
 
-            // Walk animation when moving
-            const dx = p.targetPos.x - p.currentPos.x;
-            const dz = p.targetPos.z - p.currentPos.z;
-            const isMoving = (dx * dx + dz * dz) > 0.0001;
+            // Walk animation when moving — full 3D delta: on a sphere, movement
+            // can point along any world axis, so an x/z-only check goes blind
+            // near the equator of a planet.
+            const isMoving = p.targetPos.distanceToSquared(p.currentPos) > 0.0001;
 
             // Ship render + seating (Strategy D unit 1)
             if (p.isOnBoat) {

@@ -1217,7 +1217,9 @@ export default class GameEngine {
             // keeps animating through the gap instead of freezing.
             this.particleSystem.update(dt, ctx);
 
-            // Multiplayer
+            // Multiplayer — broadcast facing in the canonical tangent frame so
+            // remote clients can rebuild it from position (see getCanonicalRotation).
+            state._netRotation = this.playerController.getCanonicalRotation();
             this.network.sendPlayerState(state);
             this.remotePlayers.update(dt, state.islands);
 

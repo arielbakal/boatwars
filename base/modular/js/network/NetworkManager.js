@@ -84,7 +84,9 @@ export default class NetworkManager {
                 y: state.player.pos.y,
                 z: state.player.pos.z
             },
-            rotation: state.player.targetRotation || 0,
+            // Canonical-frame yaw (set by GameEngine right before this call);
+            // falls back to the raw local-frame angle if it wasn't computed.
+            rotation: state._netRotation ?? (state.player.targetRotation || 0),
             isOnBoat: state.isOnBoat,
             activeAction: state.isChopping ? 'chop' : state.isMining ? 'mine' : null,
             // Melee attack is a one-shot ~0.4s swing, not a held state like chop/mine,

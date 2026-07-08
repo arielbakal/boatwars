@@ -645,6 +645,25 @@ export default class PlayerController {
         return fwd;
     }
 
+    /**
+     * Facing yaw measured against the canonical tangent frame at the player's
+     * position (SphericalUtils._getArbitraryTangent of the surface normal).
+     * Unlike targetRotation — which is relative to _surfaceForward, a frame
+     * maintained incrementally and therefore path-dependent — this angle can be
+     * reconstructed by remote clients from position alone, so it's what
+     * NetworkManager broadcasts as `rotation`.
+     */
+    getCanonicalRotation() {
+        if (!this.playerGroup || !this._currentPlanet) {
+            return this.state.player.targetRotation || 0;
+        }
+        const up = SphericalUtils.getSurfaceNormal(this.state.player.pos, this._currentPlanet);
+        const t0 = SphericalUtils._getArbitraryTangent(up);
+        const r0 = new THREE.Vector3().crossVectors(up, t0);
+        const f = this.getForward();
+        return Math.atan2(f.dot(r0), f.dot(t0));
+    }
+
     remove() {
         if (this.playerGroup) {
             this.world.remove(this.playerGroup);
