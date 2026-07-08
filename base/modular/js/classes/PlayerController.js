@@ -4,6 +4,7 @@
 
 import {
     CAMERA_MIN_Y, CAMERA_MAX_Y, CAMERA_DISTANCE, CAMERA_LERP, CAMERA_FOV,
+    CAMERA_FOV_FIRST_PERSON,
     GRAVITY, JUMP_FORCE, PLAYER_RADIUS, PLAYER_SURFACE_HEIGHT,
     GRAVITY_REFERENCE_RADIUS, MAX_FALL_SPEED, ON_GROUND_THRESHOLD,
     FRICTION_GROUND, FRICTION_STUN, ATTACK_SWING_DURATION,
@@ -404,6 +405,11 @@ export default class PlayerController {
         // --- Procedural animation ---
         this._isMoving = isMoving; // read by updateCamera()'s on-foot FOV kick
 
+        // In first person the hanging rest/walk arm poses put the always-visible
+        // right arm below the camera frustum, so it holds the tool-ready pose
+        // (-1.2, the chop rest angle) instead — Minecraft-style.
+        const fpArmRaised = player.cameraMode === 'first';
+
         if (state.isAttacking) {
             const swingT = (state._attackVisualTimer || 0) / ATTACK_SWING_DURATION;
             let armAngleR, armAngleL;
@@ -465,7 +471,9 @@ export default class PlayerController {
             this.legL.rotation.x = Math.sin(walkCycle) * 0.8;
             this.legR.rotation.x = Math.sin(walkCycle + Math.PI) * 0.8;
             this.armL.rotation.x = Math.sin(walkCycle + Math.PI) * 0.5;
-            this.armR.rotation.x = Math.sin(walkCycle) * 0.5;
+            this.armR.rotation.x = fpArmRaised
+                ? -1.2 + Math.sin(walkCycle) * 0.12 // raised, subtle bob
+                : Math.sin(walkCycle) * 0.5;
             this.modelPivot.position.y = Math.abs(Math.sin(walkCycle * 2)) * 0.05;
             this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, smoothFactor(0.1, dt));
             // Relax any aerial torso lean picked up from a jump that just landed.
@@ -482,7 +490,7 @@ export default class PlayerController {
             this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0.3, af);
             this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0.6, af); // rear leg tucks back more
             this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, -0.3, af);
-            this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, -0.3, af);
+            this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, fpArmRaised ? -1.2 : -0.3, af);
             this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, af);
             this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, af);
             this.torso.rotation.x = THREE.MathUtils.lerp(this.torso.rotation.x, 0.12, af); // small forward lean
@@ -491,7 +499,7 @@ export default class PlayerController {
             this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, lerp);
             this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, lerp);
             this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, 0, lerp);
-            this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, 0, lerp);
+            this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, fpArmRaised ? -1.2 : 0, lerp);
             this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, lerp);
             this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, lerp);
             // Relax any aerial torso lean picked up from a jump that just landed.
@@ -515,7 +523,10 @@ export default class PlayerController {
         const boostRatio = (this._isMoving && !this.state.isDead && player.speedBoost > 0 && PLAYER_SPEED_BOOST_CAP > 0)
             ? Math.min(1, player.speedBoost / PLAYER_SPEED_BOOST_CAP)
             : 0;
-        const targetFov = CAMERA_FOV + PLAYER_FOV_KICK * boostRatio;
+        // First person uses a wider base FOV; the existing kick lerp doubles as
+        // a smooth zoom transition when toggling camera modes.
+        const baseFov = player.cameraMode === 'first' ? CAMERA_FOV_FIRST_PERSON : CAMERA_FOV;
+        const targetFov = baseFov + PLAYER_FOV_KICK * boostRatio;
         const newFov = THREE.MathUtils.lerp(camera.fov, targetFov, smoothFactor(FOV_KICK_LERP, dt));
         if (Math.abs(newFov - camera.fov) > 0.01) {
             camera.fov = newFov;

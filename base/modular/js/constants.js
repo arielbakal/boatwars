@@ -16,6 +16,9 @@ export const FRICTION_STUN = 0.9;           // tangential friction during stun
 
 // Camera
 export const CAMERA_FOV = 60;
+// Wider base FOV in first person: 60 reads as tunnel vision up close and
+// pushes the always-visible right arm out of the frustum edge.
+export const CAMERA_FOV_FIRST_PERSON = 75;
 export const CAMERA_DISTANCE = 5.0;
 export const CAMERA_DISTANCE_BOAT = 8.0;
 export const CAMERA_LERP = 0.1;
