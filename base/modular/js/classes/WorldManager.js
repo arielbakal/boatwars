@@ -25,8 +25,9 @@ export default class WorldManager {
         // and the two can't drift apart again.
         this.scene.background = new THREE.Color(SPACE_FOG_COLOR);
         // Navigation-safe space fog: far (700) comfortably exceeds the farthest
-        // planet's edge (~171 units from origin, planet 3) plus travel margin, so
-        // it only ever fades far-away emptiness, never a planet you're approaching.
+        // planet's edge (~318 units from the sun at origin, Distant World on
+        // ring 4) plus travel margin, so it only ever fades far-away emptiness,
+        // never a planet you're approaching.
         // SPACE_FOG_COLOR matches scene.background above so fogged-out geometry
         // blends into the sky instead of showing a seam. Stars sit at
         // STAR_SPREAD (800-1000) — well past `far` — so they'd be fully fogged

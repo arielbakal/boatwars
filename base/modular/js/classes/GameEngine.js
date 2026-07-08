@@ -376,8 +376,11 @@ export default class GameEngine {
             return pts;
         };
 
-        // --- Planet 1: Starting Planet ---
-        const planet1 = this.factory.createPlanet(this.state.palette, 0, 0, 0, 15, PLANETS[0].hasAtmosphere);
+        // --- Planet 1: Starting Planet (ring 1, temperate tutorial world) ---
+        // Coordinates/radius/name come from constants.PLANETS — single source of
+        // truth for the solar-system layout (positions were hardcoded literals
+        // here before, silently independent of the constants).
+        const planet1 = this.factory.createPlanet(this.state.palette, PLANETS[0].x, PLANETS[0].y, PLANETS[0].z, PLANETS[0].radius, PLANETS[0].hasAtmosphere);
         this.world.add(planet1.group);
         this.islandGroups.push(planet1);
         this._trackAtmosphere(planet1);
@@ -387,7 +390,7 @@ export default class GameEngine {
             radius: planet1.radius,
             groundMesh: planet1.groundMesh, // Real displaced surface mesh for terrain sampling
             floorY: 0, // Legacy, not used in spherical mode
-            name: "STARTING PLANET"
+            name: PLANETS[0].name
         });
 
         // C1: fresh world DNA for planet 1's flora/fauna shapes
@@ -458,9 +461,9 @@ export default class GameEngine {
         this.placeOnPlanet(sword, planet1, swordPos);
         this.state.entities.push(sword); this.world.add(sword);
 
-        // --- Planet 2: Flora World ---
+        // --- Planet 2: Flora World (ring 2, humid) ---
         const palette2 = this.factory.generatePalette(null);
-        const planet2 = this.factory.createPlanet(palette2, 100, 30, 0, 18, PLANETS[1].hasAtmosphere);
+        const planet2 = this.factory.createPlanet(palette2, PLANETS[1].x, PLANETS[1].y, PLANETS[1].z, PLANETS[1].radius, PLANETS[1].hasAtmosphere);
         this.world.add(planet2.group);
         this.islandGroups.push(planet2);
         this._trackAtmosphere(planet2);
@@ -470,7 +473,7 @@ export default class GameEngine {
             radius: planet2.radius,
             groundMesh: planet2.groundMesh,
             floorY: 0,
-            name: "FLORA WORLD"
+            name: PLANETS[1].name
         });
         // C1: fresh world DNA for planet 2's flora/fauna shapes
         const planetDNA2 = this.factory.generateWorldDNA();
@@ -518,9 +521,9 @@ export default class GameEngine {
             this.state.entities.push(c); this.world.add(c);
         }
 
-        // --- Planet 3: Ancient Peaks ---
-        const palette3 = this.factory.generatePalette('blue');
-        const planet3 = this.factory.createPlanet(palette3, 0, -20, 140, 30, PLANETS[2].hasAtmosphere);
+        // --- Planet 3: Ancient Peaks (ring 3, cool highlands) ---
+        const palette3 = this.factory.generatePalette(PLANETS[2].palette);
+        const planet3 = this.factory.createPlanet(palette3, PLANETS[2].x, PLANETS[2].y, PLANETS[2].z, PLANETS[2].radius, PLANETS[2].hasAtmosphere);
         this.world.add(planet3.group);
         this.islandGroups.push(planet3);
         this._trackAtmosphere(planet3);
@@ -530,7 +533,7 @@ export default class GameEngine {
             radius: planet3.radius,
             groundMesh: planet3.groundMesh,
             floorY: 0,
-            name: "ANCIENT PEAKS"
+            name: PLANETS[2].name
         });
         // C1: fresh world DNA for planet 3's flora/fauna shapes
         const planetDNA3 = this.factory.generateWorldDNA();
@@ -603,9 +606,9 @@ export default class GameEngine {
             this.state.entities.push(c); this.world.add(c);
         }
 
-        // --- Planet 4: Rocky Outpost ---
+        // --- Planet 4: Rocky Outpost (ring 0, closest to the sun) ---
         const palette4 = this.factory.generatePalette(null);
-        const planet4 = this.factory.createPlanet(palette4, -110, 40, -60, 14, PLANETS[3].hasAtmosphere);
+        const planet4 = this.factory.createPlanet(palette4, PLANETS[3].x, PLANETS[3].y, PLANETS[3].z, PLANETS[3].radius, PLANETS[3].hasAtmosphere);
         this.world.add(planet4.group);
         this.islandGroups.push(planet4);
         this._trackAtmosphere(planet4);
@@ -615,7 +618,7 @@ export default class GameEngine {
             radius: planet4.radius,
             groundMesh: planet4.groundMesh,
             floorY: 0,
-            name: "ROCKY OUTPOST"
+            name: PLANETS[3].name
         });
         // C1: fresh world DNA for planet 4's flora/fauna shapes
         const planetDNA4 = this.factory.generateWorldDNA();
@@ -658,9 +661,9 @@ export default class GameEngine {
             this.state.entities.push(c); this.world.add(c);
         }
 
-        // --- Planet 5: Distant World ---
+        // --- Planet 5: Distant World (ring 4, outermost) ---
         const palette5 = this.factory.generatePalette(null);
-        const planet5 = this.factory.createPlanet(palette5, 60, -50, -120, 16, PLANETS[4].hasAtmosphere);
+        const planet5 = this.factory.createPlanet(palette5, PLANETS[4].x, PLANETS[4].y, PLANETS[4].z, PLANETS[4].radius, PLANETS[4].hasAtmosphere);
         this.world.add(planet5.group);
         this.islandGroups.push(planet5);
         this._trackAtmosphere(planet5);
@@ -670,7 +673,7 @@ export default class GameEngine {
             radius: planet5.radius,
             groundMesh: planet5.groundMesh,
             floorY: 0,
-            name: "DISTANT WORLD"
+            name: PLANETS[4].name
         });
         // C1: fresh world DNA for planet 5's flora/fauna shapes
         const planetDNA5 = this.factory.generateWorldDNA();
@@ -712,7 +715,7 @@ export default class GameEngine {
             this.state.entities.push(c); this.world.add(c);
         }
 
-        // --- Sun: deadly proximity hazard, far from every planet ---
+        // --- Sun: deadly proximity hazard at the center of the solar system ---
         // Registered in state.entities so resetWorld's debris sweep clears it,
         // but NOT in state.islands (it has no walkable surface or gravity frame).
         const sun = this.factory.createSun(SUN_POSITION.x, SUN_POSITION.y, SUN_POSITION.z, SUN_RADIUS);

@@ -146,13 +146,21 @@ export const DEBRIS_MIN_Y = -200;  // Increased for space (no ocean floor)
 export const MINE_DROP_COUNT = 3;
 
 // Planet definitions (replaces ISLANDS)
-// Each planet is a sphere in 3D space with a radius
+// Solar system layout: the sun sits at the origin and planets are placed on a
+// spiral of rings at increasing sunDistance (~55 degrees apart in the XZ plane,
+// small y offsets for depth). Array order is CREATION order (positional indices
+// like _applyTier(c, N) depend on it) — ring order is expressed by `ring` and
+// the coordinates, never by reordering this array.
+//
+// Difficulty follows the spiral in both directions from the temperate tutorial
+// ring: ring 0 (Rocky Outpost, closest to the sun) is the hostile hardest-reward
+// world; rings 2-4 get progressively harder/colder going outward.
 export const PLANETS = [
-    { name: "STARTING PLANET", x: 0, y: 0, z: 0, radius: 15, hasAtmosphere: true, palette: null, tier: 0 },
-    { name: "FLORA WORLD", x: 100, y: 30, z: 0, radius: 18, hasAtmosphere: true, palette: null, tier: 1 },
-    { name: "ANCIENT PEAKS", x: 0, y: -20, z: 140, radius: 30, hasAtmosphere: true, palette: 'blue', tier: 3 },
-    { name: "ROCKY OUTPOST", x: -110, y: 40, z: -60, radius: 14, hasAtmosphere: true, palette: null, tier: 2 },
-    { name: "DISTANT WORLD", x: 60, y: -50, z: -120, radius: 16, hasAtmosphere: true, palette: null, tier: 2 }
+    { name: "STARTING PLANET", x: 86, y: 0, z: 123, radius: 15, hasAtmosphere: true, palette: null, tier: 0, ring: 1, sunDistance: 150 },
+    { name: "FLORA WORLD", x: -67, y: 15, z: 183, radius: 18, hasAtmosphere: true, palette: null, tier: 1, ring: 2, sunDistance: 195 },
+    { name: "ANCIENT PEAKS", x: -237, y: -25, z: 63, radius: 30, hasAtmosphere: true, palette: 'blue', tier: 2, ring: 3, sunDistance: 245 },
+    { name: "ROCKY OUTPOST", x: 110, y: 10, z: 0, radius: 14, hasAtmosphere: true, palette: null, tier: 3, ring: 0, sunDistance: 110 },
+    { name: "DISTANT WORLD", x: -230, y: 35, z: -193, radius: 16, hasAtmosphere: true, palette: null, tier: 3, ring: 4, sunDistance: 300 }
 ];
 
 // Per-tier creature difficulty multipliers (index = PLANETS[].tier). Deterministic —
@@ -183,9 +191,12 @@ export const ATTACK_COOLDOWN = 0.4;
 export const ATTACK_RANGE = 2.0;
 export const ATTACK_ARC = Math.PI * 0.6;
 
-// Sun hazard — a deadly star far from every planet. Fixed constants (no RNG)
-// so every multiplayer client agrees on it without touching the world seed.
-export const SUN_POSITION = { x: -60, y: 90, z: 200 };
+// Sun hazard — the deadly star at the center of the solar system. Fixed
+// constants (no RNG) so every multiplayer client agrees on it without touching
+// the world seed. The innermost planet (ring 0) orbits at sunDistance 110, so
+// its nearest surface point (~96 units) clears SUN_DAMAGE_RADIUS with margin —
+// but flying a straight line between planets can still graze the heat zone.
+export const SUN_POSITION = { x: 0, y: 0, z: 0 };
 export const SUN_RADIUS = 22;
 export const SUN_DAMAGE_RADIUS = 85; // heat zone outer edge, measured from sun center
 export const SUN_DAMAGE_MIN = 1;     // hp per tick at the zone edge
