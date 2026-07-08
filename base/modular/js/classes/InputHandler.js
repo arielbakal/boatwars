@@ -488,6 +488,9 @@ export default class InputHandler {
 
             // Don't pick up creatures — they are attackable, not collectible
             if (root.userData.type === 'creature') return;
+            // The sun is scenery/hazard, not an item (no color either — storing
+            // it would crash the inventory renderer on color.getHexString)
+            if (root.userData.type === 'sun') return;
 
             if (root.userData.type && root.userData.type !== 'tree') {
                 sfx.pickup();

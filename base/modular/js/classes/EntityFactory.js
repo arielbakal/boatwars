@@ -1089,6 +1089,45 @@ export default class EntityFactory {
         return g;
     }
 
+    /**
+     * Deadly sun — pure visual here; the proximity heat damage lives in
+     * CombatSystem._updateSunHazard. Deliberately RNG-free so creating it
+     * inside the seeded initGame doesn't shift world-generation draws.
+     * MeshBasicMaterial (self-lit) + fog:false keep it readable from any
+     * distance as a landmark.
+     */
+    createSun(x, y, z, radius) {
+        const g = new THREE.Group();
+
+        const core = new THREE.Mesh(
+            new THREE.IcosahedronGeometry(radius, 2),
+            new THREE.MeshBasicMaterial({ color: 0xffdd33, fog: false })
+        );
+        g.add(core);
+
+        const innerGlow = new THREE.Mesh(
+            new THREE.IcosahedronGeometry(radius * 1.15, 2),
+            new THREE.MeshBasicMaterial({
+                color: 0xff8800, transparent: true, opacity: 0.3,
+                blending: THREE.AdditiveBlending, depthWrite: false, fog: false
+            })
+        );
+        g.add(innerGlow);
+
+        const outerGlow = new THREE.Mesh(
+            new THREE.IcosahedronGeometry(radius * 1.4, 2),
+            new THREE.MeshBasicMaterial({
+                color: 0xff4400, transparent: true, opacity: 0.12,
+                blending: THREE.AdditiveBlending, depthWrite: false, fog: false
+            })
+        );
+        g.add(outerGlow);
+
+        g.position.set(x, y, z);
+        g.userData = { type: 'sun', radius };
+        return g;
+    }
+
     createSword(palette, x, z) {
         const g = new THREE.Group();
         const woodMaterial = new THREE.MeshToonMaterial({ color: 0x5d4037 });

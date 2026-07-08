@@ -11,7 +11,8 @@ import {
     STAT_BOOST_PICKUP_RANGE, STAT_BOOST_BOB_SPEED, STAT_BOOST_BOB_HEIGHT, STAT_BOOST_SPIN_SPEED,
     CREATURE_ESSENCE_MAP, ATTACK_SWING_DURATION,
     ESSENCE_ATTACK_CAP_MULT, ESSENCE_MAX_HP_CAP_MULT, PLAYER_SPEED_BOOST_CAP,
-    SWORD_ATTACK_BONUS
+    SWORD_ATTACK_BONUS,
+    SUN_RADIUS, SUN_DAMAGE_RADIUS, SUN_DAMAGE_MIN, SUN_DAMAGE_MAX, SUN_DAMAGE_TICK
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
 import { smoothFactor } from '../classes/Easing.js';
@@ -43,13 +44,14 @@ export default class CombatSystem {
         this._updateKnockback(dt, ctx);     // C7: lerp-based knockback
 
         if (state.isDead) {
-            this._updateDeathRespawn(dt, state);
+            this._updateDeathRespawn(dt, state, ctx);
             this._updateUI(state);
             return;
         }
 
         this._updateCreatureAggro(dt, state, ctx);
         this._updateCreatureContact(dt, ctx);
+        this._updateSunHazard(dt, ctx);
         this._updateStatBoosts(dt, state, ctx.world, ctx.audio, ctx.factory, ctx.t);
         this._updateUI(state);
     }
@@ -340,6 +342,35 @@ export default class CombatSystem {
         }
     }
 
+    /**
+     * Sun proximity heat: inside SUN_DAMAGE_RADIUS of the sun's center, damage
+     * ticks every SUN_DAMAGE_TICK seconds, scaling linearly from SUN_DAMAGE_MIN
+     * at the zone edge to SUN_DAMAGE_MAX at the surface. Applies on foot AND
+     * while flying — the sun is the one hazard that can kill a pilot mid-flight
+     * (see the forced dismount in _updateDeathRespawn). Routed through
+     * _damagePlayer so invincibility, flash, damage numbers, and death all
+     * behave exactly like any other damage source. No knockback (sourcePos
+     * null): shoving the ship around from outside BoatSystem would fight its
+     * physics.
+     */
+    _updateSunHazard(dt, ctx) {
+        const { state } = ctx;
+        if (!state.sunCenter) return;
+        const dist = state.player.pos.distanceTo(state.sunCenter);
+        if (dist >= SUN_DAMAGE_RADIUS) {
+            this._sunTickTimer = 0;
+            return;
+        }
+        this._sunTickTimer = (this._sunTickTimer || 0) + dt;
+        if (this._sunTickTimer < SUN_DAMAGE_TICK) return;
+        this._sunTickTimer = 0;
+        const heat = THREE.MathUtils.clamp(
+            1 - (dist - SUN_RADIUS) / (SUN_DAMAGE_RADIUS - SUN_RADIUS), 0, 1
+        );
+        const damage = Math.round(THREE.MathUtils.lerp(SUN_DAMAGE_MIN, SUN_DAMAGE_MAX, heat));
+        this._damagePlayer(damage, ctx, null);
+    }
+
     _updateCreatureContact(dt, ctx) {
         const { state } = ctx;
         const playerPos = state.player.pos;
@@ -398,12 +429,32 @@ export default class CombatSystem {
         }
     }
 
-    _updateDeathRespawn(dt, state) {
+    _updateDeathRespawn(dt, state, ctx = {}) {
         state.deathTimer -= dt;
         if (state.deathTimer <= 0) {
             state.isDead = false;
             state.player.hp = state.player.maxHp;
             state.invincibleTimer = RESPAWN_INVINCIBILITY;
+            // Sun heat can kill a pilot mid-flight — something no creature can
+            // do — so respawn must also dismount, or the player revives on a
+            // planet surface with ship physics/camera still driving them.
+            // Mirrors BoatSystem.disembarkBoat's state teardown (which can't be
+            // called here: it refuses to exit in deep space, where sun deaths
+            // happen). The ship itself stays parked where the pilot died.
+            if (state.isOnBoat) {
+                state.isOnBoat = false;
+                state.boatSpeed = 0;
+                if (state.shipVelocity) state.shipVelocity.set(0, 0, 0);
+                if (state.shipQuaternion) state.shipQuaternion.identity();
+                state.shipCameraMode = 'chase';
+                if (ctx.boatSystem) {
+                    ctx.boatSystem.showBoatHUD(false);
+                    if (ctx.playerController) ctx.boatSystem.resetSeatedPose(ctx.playerController);
+                }
+                if (ctx.playerController && ctx.playerController.playerGroup) {
+                    ctx.playerController.playerGroup.visible = true;
+                }
+            }
             // Respawn on nearest planet surface
             if (state.islands.length > 0) {
                 const result = SphericalUtils.findNearestPlanet(state.player.pos, state.islands);

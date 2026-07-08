@@ -183,6 +183,15 @@ export const ATTACK_COOLDOWN = 0.4;
 export const ATTACK_RANGE = 2.0;
 export const ATTACK_ARC = Math.PI * 0.6;
 
+// Sun hazard — a deadly star far from every planet. Fixed constants (no RNG)
+// so every multiplayer client agrees on it without touching the world seed.
+export const SUN_POSITION = { x: -60, y: 90, z: 200 };
+export const SUN_RADIUS = 22;
+export const SUN_DAMAGE_RADIUS = 85; // heat zone outer edge, measured from sun center
+export const SUN_DAMAGE_MIN = 1;     // hp per tick at the zone edge
+export const SUN_DAMAGE_MAX = 5;     // hp per tick hugging the surface
+export const SUN_DAMAGE_TICK = 0.5;  // seconds between heat ticks
+
 // Creature combat
 export const CREATURE_HP = 6;
 export const CREATURE_CONTACT_DAMAGE = 2;

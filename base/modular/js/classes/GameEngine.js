@@ -25,7 +25,7 @@ import NetworkManager from '../network/NetworkManager.js';
 import RemotePlayerManager from '../network/RemotePlayerManager.js';
 import SeededRandom from '../network/SeededRandom.js';
 
-import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV, RENDER_SCALE, STACKS_BY_TYPE, SHIP_LOG_CLUSTER_RADIUS } from '../constants.js';
+import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV, RENDER_SCALE, STACKS_BY_TYPE, SHIP_LOG_CLUSTER_RADIUS, SUN_POSITION, SUN_RADIUS } from '../constants.js';
 
 export default class GameEngine {
     constructor() {
@@ -701,6 +701,14 @@ export default class GameEngine {
             this.state.entities.push(c); this.world.add(c);
         }
 
+        // --- Sun: deadly proximity hazard, far from every planet ---
+        // Registered in state.entities so resetWorld's debris sweep clears it,
+        // but NOT in state.islands (it has no walkable surface or gravity frame).
+        const sun = this.factory.createSun(SUN_POSITION.x, SUN_POSITION.y, SUN_POSITION.z, SUN_RADIUS);
+        this.world.add(sun);
+        this.state.entities.push(sun);
+        this.state.sunCenter = sun.position.clone();
+
         // --- Spawn player on planet 1 surface (top) ---
         const spawnNormal = new THREE.Vector3(0, 1, 0);
         const spawnPos = planet1.center.clone().add(spawnNormal.multiplyScalar(planet1.radius + 2));
@@ -1167,6 +1175,7 @@ export default class GameEngine {
                 camera,
                 playerController: this.playerController,
                 playerCat: this.playerCat,
+                boatSystem: this.boatSystem,
                 remotePlayers: this.remotePlayers,
                 t,
                 broadcastWorldEvent: (action, x, z, extra) => this.broadcastWorldEvent(action, x, z, extra)
