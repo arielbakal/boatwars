@@ -1089,6 +1089,45 @@ export default class EntityFactory {
         return g;
     }
 
+    createSword(palette, x, z) {
+        const g = new THREE.Group();
+        const woodMaterial = new THREE.MeshToonMaterial({ color: 0x5d4037 });
+        const guardMaterial = new THREE.MeshToonMaterial({ color: 0x8d6e63 });
+        const bladeMaterial = new THREE.MeshToonMaterial({ color: 0xcfd8dc });
+        const edgeMaterial = new THREE.MeshToonMaterial({ color: 0xeeeeee });
+
+        const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.018, 0.14, 6), woodMaterial);
+        g.add(grip);
+
+        const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), guardMaterial);
+        pommel.position.y = -0.08;
+        g.add(pommel);
+
+        const guard = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.025, 0.035), guardMaterial);
+        guard.position.y = 0.08;
+        g.add(guard);
+
+        const edge = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.3, 0.006), edgeMaterial);
+        edge.position.y = 0.25;
+        g.add(edge);
+
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.32, 0.012), bladeMaterial);
+        blade.position.y = 0.25;
+        g.add(blade);
+
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.032, 0.06, 4), bladeMaterial);
+        tip.position.y = 0.44;
+        tip.rotation.y = Math.PI / 4;
+        g.add(tip);
+
+        g.position.set(x, 0, z);
+        g.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.5;
+        g.rotation.y = Math.random() * Math.PI * 2;
+        g.scale.set(0, 0, 0);
+        g.userData = { type: 'sword', color: null, heightOffset: 0.1 };
+        return g;
+    }
+
     createStatBoost(x, z, boostData) {
         const g = new THREE.Group();
         const colorMap = { attack: 0xff4444, speed: 0x44ff44, health: 0xff88cc };

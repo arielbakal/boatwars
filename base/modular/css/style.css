@@ -770,6 +770,16 @@ input[type=range] {
     box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
 }
 
+/* Sword icon for inventory */
+.icon-sword {
+    width: 6px;
+    height: 18px;
+    background: linear-gradient(to bottom, #cfd8dc 70%, #5d4037 70%);
+    border: 2px solid rgba(0, 0, 0, 0.4);
+    border-radius: 2px;
+    box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
+}
+
 /* =====================================================
    MULTIPLAYER PANEL
    ===================================================== */

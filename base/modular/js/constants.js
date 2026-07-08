@@ -127,7 +127,7 @@ export const MAX_FOODS = 30;            // population cap to prevent food overlo
 
 // Inventory
 export const INVENTORY_SLOTS = 8;
-export const NON_STACKABLE_TYPES = ['creature', 'egg', 'axe', 'pickaxe'];
+export const NON_STACKABLE_TYPES = ['creature', 'egg', 'axe', 'pickaxe', 'sword'];
 // Base resources stack by type alone — per-planet palette colors would otherwise
 // split them into one slot per planet and exhaust the inventory. Single source of
 // truth shared by GameEngine.addToInventory and InventoryManager (addToInventory +
@@ -177,6 +177,8 @@ export const SCALE_LERP = 0.05;
 // Player combat
 export const PLAYER_MAX_HP = 20;
 export const PLAYER_BASE_ATTACK = 2;
+// Flat melee bonus while the sword is the selected hotbar item
+export const SWORD_ATTACK_BONUS = 2;
 export const ATTACK_COOLDOWN = 0.4;
 export const ATTACK_RANGE = 2.0;
 export const ATTACK_ARC = Math.PI * 0.6;

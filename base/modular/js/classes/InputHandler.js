@@ -133,9 +133,11 @@ export default class InputHandler {
 
         let item = null;
 
-        if (type === 'axe' || type === 'pickaxe') {
+        if (type === 'axe' || type === 'pickaxe' || type === 'sword') {
             if (type === 'axe') {
                 item = this.engine.factory.createAxe(state.palette, 0, 0);
+            } else if (type === 'sword') {
+                item = this.engine.factory.createSword(state.palette, 0, 0);
             } else {
                 item = this.engine.factory.createPickaxe(state.palette, 0, 0);
             }
@@ -363,7 +365,7 @@ export default class InputHandler {
         if (state.selectedSlot !== null && state.inventory[state.selectedSlot]) {
             const selectedType = this.getSelectedType();
             // Don't place tools — they are "used" not "placed"
-            if (selectedType !== 'axe' && selectedType !== 'pickaxe') {
+            if (selectedType !== 'axe' && selectedType !== 'pickaxe' && selectedType !== 'sword') {
                 this.handlePlace();
                 return;
             }
@@ -460,8 +462,8 @@ export default class InputHandler {
                 return;
             }
 
-            // Axe / Pickaxe — pick up into inventory
-            if (root.userData.type === 'axe' || root.userData.type === 'pickaxe') {
+            // Axe / Pickaxe / Sword — pick up into inventory
+            if (root.userData.type === 'axe' || root.userData.type === 'pickaxe' || root.userData.type === 'sword') {
                 const dist = state.player.pos.distanceTo(root.position);
                 if (dist < 4) {
                     const success = this.engine.addToInventory(root.userData.type, root.userData.color || new THREE.Color(0x5d4037), null);
@@ -752,7 +754,7 @@ export default class InputHandler {
         this._nearestTool = null;
         let nearestToolDist = 4.0; // pickup range
         for (const e of state.entities) {
-            if (e.userData.type !== 'axe' && e.userData.type !== 'pickaxe') continue;
+            if (e.userData.type !== 'axe' && e.userData.type !== 'pickaxe' && e.userData.type !== 'sword') continue;
             const dist = playerPos.distanceTo(e.position);
             if (dist < nearestToolDist) {
                 nearestToolDist = dist;

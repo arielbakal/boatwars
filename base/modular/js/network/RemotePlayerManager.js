@@ -313,7 +313,7 @@ export default class RemotePlayerManager {
             const model = this._buildHeldItemModel(itemType, color);
             p.heldItemContainer.add(model);
             p.currentHeldType = itemType;
-        } else if (itemType !== 'axe' && itemType !== 'pickaxe') {
+        } else if (itemType !== 'axe' && itemType !== 'pickaxe' && itemType !== 'sword') {
             // Same type, update color for non-tool items
             p.heldItemContainer.traverse(c => {
                 if (c.material) c.material.color.setHex(color);
@@ -365,6 +365,25 @@ export default class RemotePlayerManager {
                 tipR.rotation.z = -Math.PI / 2 - 0.3;
                 tipR.position.set(0.15, 0.16, 0);
                 g.add(tipR);
+                g.rotation.set(Math.PI, Math.PI, -Math.PI / 4);
+                break;
+            }
+            case 'sword': {
+                const woodMat = new THREE.MeshToonMaterial({ color: 0x5d4037 });
+                const guardMat = new THREE.MeshToonMaterial({ color: 0x8d6e63 });
+                const bladeMat = new THREE.MeshToonMaterial({ color: 0xcfd8dc });
+                const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.018, 0.14, 6), woodMat);
+                g.add(grip);
+                const guard = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.025, 0.035), guardMat);
+                guard.position.y = 0.08;
+                g.add(guard);
+                const blade = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.32, 0.012), bladeMat);
+                blade.position.y = 0.25;
+                g.add(blade);
+                const tip = new THREE.Mesh(new THREE.ConeGeometry(0.032, 0.06, 4), bladeMat);
+                tip.position.y = 0.44;
+                tip.rotation.y = Math.PI / 4;
+                g.add(tip);
                 g.rotation.set(Math.PI, Math.PI, -Math.PI / 4);
                 break;
             }

@@ -422,6 +422,12 @@ export default class GameEngine {
         const axe = this.factory.createAxe(this.state.palette, 0, 0);
         this.placeOnPlanet(axe, planet1, axePos);
         this.state.entities.push(axe); this.world.add(axe);
+        // Sword — melee weapon so creatures can be fought without the axe
+        // (whose click chops the tree under the crosshair instead of swinging)
+        const swordPos = rndSurface(planet1, 2.0, 12.0);
+        const sword = this.factory.createSword(this.state.palette, 0, 0);
+        this.placeOnPlanet(sword, planet1, swordPos);
+        this.state.entities.push(sword); this.world.add(sword);
 
         // --- Planet 2: Flora World ---
         const palette2 = this.factory.generatePalette(null);

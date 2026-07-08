@@ -10,7 +10,8 @@ import {
     RESPAWN_INVINCIBILITY, PLAYER_RADIUS,
     STAT_BOOST_PICKUP_RANGE, STAT_BOOST_BOB_SPEED, STAT_BOOST_BOB_HEIGHT, STAT_BOOST_SPIN_SPEED,
     CREATURE_ESSENCE_MAP, ATTACK_SWING_DURATION,
-    ESSENCE_ATTACK_CAP_MULT, ESSENCE_MAX_HP_CAP_MULT, PLAYER_SPEED_BOOST_CAP
+    ESSENCE_ATTACK_CAP_MULT, ESSENCE_MAX_HP_CAP_MULT, PLAYER_SPEED_BOOST_CAP,
+    SWORD_ATTACK_BONUS
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
 import { smoothFactor } from '../classes/Easing.js';
@@ -68,7 +69,11 @@ export default class CombatSystem {
 
         audio.chop();
 
-        const damage = state.player.attack || PLAYER_BASE_ATTACK;
+        // Sword grants a flat bonus while selected — it stacks with (not
+        // replaces) attack-essence boosts already folded into player.attack.
+        const held = state.selectedSlot !== null ? state.inventory[state.selectedSlot] : null;
+        const swordBonus = held && held.type === 'sword' ? SWORD_ATTACK_BONUS : 0;
+        const damage = (state.player.attack || PLAYER_BASE_ATTACK) + swordBonus;
 
         const targets = this._findAttackTargets(state);
         for (const entity of targets) {
