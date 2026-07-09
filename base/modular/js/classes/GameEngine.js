@@ -25,7 +25,7 @@ import NetworkManager from '../network/NetworkManager.js';
 import RemotePlayerManager from '../network/RemotePlayerManager.js';
 import SeededRandom from '../network/SeededRandom.js';
 
-import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV, RENDER_SCALE, STACKS_BY_TYPE, SHIP_LOG_CLUSTER_RADIUS, SUN_POSITION, SUN_RADIUS } from '../constants.js';
+import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV, RENDER_SCALE, STACKS_BY_TYPE, SHIP_LOG_CLUSTER_RADIUS, SUN_POSITION, SUN_RADIUS, MINABLE_ROCK_TYPES } from '../constants.js';
 import { smoothFactor } from './Easing.js';
 
 export default class GameEngine {
@@ -687,6 +687,15 @@ export default class GameEngine {
             this.placeOnPlanet(ember, planet4, pos);
             this.state.entities.push(ember); this.world.add(ember);
         }
+        // Ring-exclusive resource: fire crystals — mining one pays out an
+        // attack essence (the inner ring is the combat-reward run; see
+        // constants.CRYSTAL_ESSENCE_MAP).
+        for (let i = 0; i < 8; i++) {
+            const pos = rndAnywhere(planet4);
+            const crystal = this.factory.createCrystal(palette4, 0, 0, 'fire_crystal', 0.9 + Math.random() * 0.7);
+            this.placeOnPlanet(crystal, planet4, pos);
+            this.state.entities.push(crystal); this.world.add(crystal);
+        }
         for (let i = 0; i < 3; i++) {
             const pos = rndAnywhere(planet4);
             const creatureDNA = this.factory.generateCreatureDNA(palette4, speciesTypes[i]);
@@ -742,6 +751,15 @@ export default class GameEngine {
             const e = this.factory.createFlower(palette5, 0, 0);
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
+        }
+        // Ring-exclusive resource: frost crystals — mining one pays out a
+        // speed essence (the outermost ring rewards the explorers who make
+        // the longest trip; see constants.CRYSTAL_ESSENCE_MAP).
+        for (let i = 0; i < 8; i++) {
+            const pos = rndAnywhere(planet5);
+            const crystal = this.factory.createCrystal(palette5, 0, 0, 'frost_crystal', 0.9 + Math.random() * 0.7);
+            this.placeOnPlanet(crystal, planet5, pos);
+            this.state.entities.push(crystal); this.world.add(crystal);
         }
         for (let i = 0; i < 3; i++) {
             const pos = rndAnywhere(planet5);
@@ -1124,7 +1142,7 @@ export default class GameEngine {
             }
             case 'rock_mined': {
                 const idx = this.state.entities.findIndex(e =>
-                    (e.userData.type === 'rock' || e.userData.type === 'gold_rock') &&
+                    MINABLE_ROCK_TYPES.includes(e.userData.type) &&
                     Math.abs(e.position.x - event.x) < 2 &&
                     Math.abs(e.position.z - event.z) < 2
                 );

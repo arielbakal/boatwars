@@ -257,6 +257,19 @@ export const CREATURE_ESSENCE_MAP = {
     blobby:   { stat: 'attack', amount: 1 },
     blocky:   { stat: 'health', amount: 3 }
 };
+
+// Ring-exclusive crystals — the spiral's progression hooks. Each extreme ring
+// grows a mineable crystal that pays out a stat essence instead of ore
+// (generalizes "gold only on Ancient Peaks" with zero new inventory UI): the
+// scorched inner ring rewards attack, the frozen outer ring speed.
+export const CRYSTAL_ESSENCE_MAP = {
+    fire_crystal:  { stat: 'attack', amount: 1 },
+    frost_crystal: { stat: 'speed', amount: 0.01 }
+};
+// Everything a pickaxe can target. Shared by InputHandler (highlighting and
+// mine start) and GameEngine's remote rock_mined handler so the three
+// call sites can't drift apart.
+export const MINABLE_ROCK_TYPES = ['rock', 'gold_rock', 'fire_crystal', 'frost_crystal'];
 export const ATTACK_SWING_DURATION = 0.4;
 
 // Discoverable crafting hint

@@ -710,6 +710,42 @@ export default class EntityFactory {
     }
 
     /**
+     * Ring-exclusive crystal formation (kind: 'fire_crystal' | 'frost_crystal').
+     * Same recipe as the gold rock — dark distorted base with emissive growths
+     * spottable from a distance — but the growths are crystal spikes and
+     * mining pays out a stat essence (see constants.CRYSTAL_ESSENCE_MAP)
+     * instead of ore.
+     */
+    createCrystal(p, x, z, kind, scale = 1.0) {
+        const g = new THREE.Group();
+        const stoneMat = this.getMat(p.baseRock.clone().lerp(new THREE.Color(0x333333), 0.5));
+        const tint = kind === 'fire_crystal' ? 0xff5522 : 0x7de8ff;
+        const crystalMat = new THREE.MeshToonMaterial({ color: tint, emissive: tint, emissiveIntensity: 0.7 });
+
+        const baseGeo = this.distortGeometryRadial(
+            new THREE.DodecahedronGeometry(0.7 * scale, 0),
+            0.7 * scale * (0.12 + Math.random() * 0.06),
+            Math.random() * 1000
+        );
+        g.add(new THREE.Mesh(baseGeo, stoneMat));
+
+        for (let i = 0; i < 4; i++) {
+            const h = (0.7 + Math.random() * 0.6) * scale;
+            const spike = new THREE.Mesh(new THREE.ConeGeometry(0.16 * scale, h, 5), crystalMat);
+            const ang = Math.random() * Math.PI * 2;
+            const lean = 0.25 + Math.random() * 0.5;
+            spike.position.set(Math.cos(ang) * 0.35 * scale, 0.3 * scale + h * 0.3, Math.sin(ang) * 0.35 * scale);
+            spike.rotation.set(Math.sin(ang) * lean, 0, -Math.cos(ang) * lean);
+            g.add(spike);
+        }
+
+        g.position.set(x, 0, z);
+        g.userData = { type: kind, radius: 0.7 * scale, color: p.baseRock, heightOffset: 0.3 + 0.15 * scale };
+        this.state.obstacles.push(g);
+        return g;
+    }
+
+    /**
      * Ember shard: a small pair of self-lit tetrahedra for scorched worlds.
      * MeshBasicMaterial ignores scene lighting, so shards glow against the
      * dark rock — the cheap static stand-in for drifting ember particles.

@@ -2,7 +2,7 @@
 // MINE SYSTEM - Rock/Gold mining mechanics (spherical)
 // =====================================================
 
-import { MINE_HITS, HIT_INTERVAL, CHOP_MAX_RANGE, MINE_DROP_COUNT } from '../constants.js';
+import { MINE_HITS, HIT_INTERVAL, CHOP_MAX_RANGE, MINE_DROP_COUNT, CRYSTAL_ESSENCE_MAP } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
 
 export default class MineSystem {
@@ -54,34 +54,50 @@ export default class MineSystem {
             if (state.mineProgress >= MINE_HITS) {
                 audio.treeFall();
 
-                // Spawn resource drops
-                const dropColor = rock.userData.type === 'gold_rock'
-                    ? new THREE.Color(0xffd700)
-                    : (rock.userData.color || new THREE.Color(0x888888));
-
-                const dropType = rock.userData.type === 'gold_rock' ? 'gold' : 'rock';
-
-                for (let i = 0; i < MINE_DROP_COUNT; i++) {
-                    const drop = new THREE.Mesh(
-                        new THREE.DodecahedronGeometry(0.15),
-                        world.getMat(dropColor)
-                    );
-                    drop.userData = { type: dropType, color: dropColor, autoPickup: true };
-
-                    // Place drops on planet surface near the mined rock
-                    const rockPlanet = rock.userData.planet;
-                    if (rockPlanet) {
-                        const dropPos = SphericalUtils.randomSurfacePointNear(rockPlanet, rock.position, 0.2, 0.8);
-                        const normal = SphericalUtils.getSurfaceNormal(dropPos, rockPlanet);
-                        // Sample real terrain height so drops land on the displaced surface
-                        const terrainRadius = SphericalUtils.sampleTerrainHeight(rockPlanet, normal);
-                        drop.position.copy(rockPlanet.center.clone().add(normal.multiplyScalar(terrainRadius + 0.15)));
-                        drop.userData.planet = rockPlanet;
-                    } else {
-                        drop.position.copy(rock.position);
+                const crystalEssence = CRYSTAL_ESSENCE_MAP[rock.userData.type];
+                if (crystalEssence) {
+                    // Ring-exclusive crystals pay out a stat essence instead of
+                    // ore — same pickup path as creature essence drops (see
+                    // CombatSystem._damageEntity's death branch).
+                    const boost = factory.createStatBoost(rock.position.x, rock.position.z, crystalEssence);
+                    boost.userData.planet = rock.userData.planet;
+                    if (rock.userData.planet) {
+                        const normal = SphericalUtils.getSurfaceNormal(rock.position, rock.userData.planet);
+                        boost.position.copy(rock.userData.planet.center.clone()
+                            .add(normal.multiplyScalar(rock.userData.planet.radius + 0.5)));
                     }
-                    world.add(drop);
-                    state.entities.push(drop);
+                    world.add(boost);
+                    state.statBoosts.push(boost);
+                } else {
+                    // Spawn resource drops
+                    const dropColor = rock.userData.type === 'gold_rock'
+                        ? new THREE.Color(0xffd700)
+                        : (rock.userData.color || new THREE.Color(0x888888));
+
+                    const dropType = rock.userData.type === 'gold_rock' ? 'gold' : 'rock';
+
+                    for (let i = 0; i < MINE_DROP_COUNT; i++) {
+                        const drop = new THREE.Mesh(
+                            new THREE.DodecahedronGeometry(0.15),
+                            world.getMat(dropColor)
+                        );
+                        drop.userData = { type: dropType, color: dropColor, autoPickup: true };
+
+                        // Place drops on planet surface near the mined rock
+                        const rockPlanet = rock.userData.planet;
+                        if (rockPlanet) {
+                            const dropPos = SphericalUtils.randomSurfacePointNear(rockPlanet, rock.position, 0.2, 0.8);
+                            const normal = SphericalUtils.getSurfaceNormal(dropPos, rockPlanet);
+                            // Sample real terrain height so drops land on the displaced surface
+                            const terrainRadius = SphericalUtils.sampleTerrainHeight(rockPlanet, normal);
+                            drop.position.copy(rockPlanet.center.clone().add(normal.multiplyScalar(terrainRadius + 0.15)));
+                            drop.userData.planet = rockPlanet;
+                        } else {
+                            drop.position.copy(rock.position);
+                        }
+                        world.add(drop);
+                        state.entities.push(drop);
+                    }
                 }
 
                 // Remove rock

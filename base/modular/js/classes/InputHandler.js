@@ -3,7 +3,7 @@
 // =====================================================
 
 import SphericalUtils from './SphericalUtils.js';
-import { SHIP_COLLISION_RADIUS } from '../constants.js';
+import { SHIP_COLLISION_RADIUS, MINABLE_ROCK_TYPES } from '../constants.js';
 
 export default class InputHandler {
     constructor(engine) {
@@ -318,7 +318,7 @@ export default class InputHandler {
             // Mining — pickaxe must be selected
             if (selectedType === 'pickaxe' && state.interactionTarget) {
                 const type = state.interactionTarget.userData.type;
-                if (type === 'rock' || type === 'gold_rock') {
+                if (MINABLE_ROCK_TYPES.includes(type)) {
                     state.isMining = true;
                     state.mineTimer = 0;
                     return;
@@ -727,9 +727,10 @@ export default class InputHandler {
                 }
             }
             // Minable rocks (when pickaxe selected)
-            if ((e.userData.type === 'rock' || e.userData.type === 'gold_rock') && selectedType === 'pickaxe') {
-                // Only highlight large-scale rocks (obstacle rocks), not small drops
-                if (state.obstacles.includes(e) || e.userData.type === 'gold_rock') {
+            if (MINABLE_ROCK_TYPES.includes(e.userData.type) && selectedType === 'pickaxe') {
+                // Only highlight large-scale rocks (obstacle rocks), not small
+                // drops (which reuse type 'rock'); gold/crystals never spawn as drops
+                if (state.obstacles.includes(e) || e.userData.type !== 'rock') {
                     const dist = e.position.distanceTo(playerPos);
                     if (dist < interactRange && dist < nearestDist) {
                         nearestDist = dist;
