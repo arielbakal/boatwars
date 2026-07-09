@@ -326,7 +326,7 @@ export default class GameEngine {
         }
 
         this.state.phase = 'playing';
-        this.state.palette = this.factory.generatePalette(sphereColor);
+        this.state.palette = this.factory.generatePalette(sphereColor, PLANETS[0].eco);
         // C1: state.worldDNA stays a session-wide roll for non-planet consumers only
         // (currently: AudioManager.startMusic's procedural seed). Each planet below
         // rolls its OWN fresh DNA (planetDNA1..5) right after its islands.push() so
@@ -375,12 +375,19 @@ export default class GameEngine {
             }
             return pts;
         };
+        // Ecosystem density scaling — humid worlds grow more flora clusters,
+        // dry worlds expose more rock. eco values are static constants, so the
+        // resulting counts (and therefore the seeded RNG draw sequence) are
+        // identical on every client.
+        const floraClusters = (base, eco) => Math.max(1, Math.round(base * (0.5 + eco.humidity)));
+        const rockClusters = (base, eco) => Math.max(1, Math.round(base * (1.5 - eco.humidity)));
 
         // --- Planet 1: Starting Planet (ring 1, temperate tutorial world) ---
         // Coordinates/radius/name come from constants.PLANETS — single source of
         // truth for the solar-system layout (positions were hardcoded literals
         // here before, silently independent of the constants).
-        const planet1 = this.factory.createPlanet(this.state.palette, PLANETS[0].x, PLANETS[0].y, PLANETS[0].z, PLANETS[0].radius, PLANETS[0].hasAtmosphere);
+        const eco1 = PLANETS[0].eco;
+        const planet1 = this.factory.createPlanet(this.state.palette, PLANETS[0].x, PLANETS[0].y, PLANETS[0].z, PLANETS[0].radius, PLANETS[0].hasAtmosphere, eco1);
         this.world.add(planet1.group);
         this.islandGroups.push(planet1);
         this._trackAtmosphere(planet1);
@@ -397,32 +404,32 @@ export default class GameEngine {
         const planetDNA1 = this.factory.generateWorldDNA();
 
         // Trees on planet 1 — groves across the whole sphere
-        for (const pos of clusterPoints(planet1, 8, 3, 2.5)) {
+        for (const pos of clusterPoints(planet1, floraClusters(8, eco1), 3, 2.5)) {
             const tree = this.factory.createTree(this.state.palette, 0, 0, this._treeStyleFromDNA(planetDNA1, this.state.palette));
             this.placeOnPlanet(tree, planet1, pos);
             this.state.entities.push(tree);
             this.world.add(tree);
         }
         // Bushes
-        for (const pos of clusterPoints(planet1, 6, 2, 2.0)) {
+        for (const pos of clusterPoints(planet1, floraClusters(6, eco1), 2, 2.0)) {
             const e = this.factory.createBush(this.state.palette, 0, 0, this._bushStyleFromDNA(planetDNA1, this.state.palette));
             this.placeOnPlanet(e, planet1, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         // Rocks
-        for (const pos of clusterPoints(planet1, 5, 2, 1.8)) {
+        for (const pos of clusterPoints(planet1, rockClusters(5, eco1), 2, 1.8)) {
             const e = this.factory.createRock(this.state.palette, 0, 0, this._rockStyleFromDNA(planetDNA1, this.state.palette));
             this.placeOnPlanet(e, planet1, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         // Grass
-        for (const pos of clusterPoints(planet1, 14, 5, 2.2)) {
+        for (const pos of clusterPoints(planet1, floraClusters(14, eco1), 5, 2.2)) {
             const e = this.factory.createGrass(this.state.palette, 0, 0, this._grassStyleFromDNA(planetDNA1, this.state.palette));
             this.placeOnPlanet(e, planet1, pos);
             this.state.entities.push(e); this.world.add(e);
         }
         // Flowers
-        for (const pos of clusterPoints(planet1, 6, 3, 1.5)) {
+        for (const pos of clusterPoints(planet1, floraClusters(6, eco1), 3, 1.5)) {
             const e = this.factory.createFlower(this.state.palette, 0, 0);
             this.placeOnPlanet(e, planet1, pos);
             this.state.entities.push(e); this.world.add(e);
@@ -462,8 +469,9 @@ export default class GameEngine {
         this.state.entities.push(sword); this.world.add(sword);
 
         // --- Planet 2: Flora World (ring 2, humid) ---
-        const palette2 = this.factory.generatePalette(null);
-        const planet2 = this.factory.createPlanet(palette2, PLANETS[1].x, PLANETS[1].y, PLANETS[1].z, PLANETS[1].radius, PLANETS[1].hasAtmosphere);
+        const eco2 = PLANETS[1].eco;
+        const palette2 = this.factory.generatePalette(null, eco2);
+        const planet2 = this.factory.createPlanet(palette2, PLANETS[1].x, PLANETS[1].y, PLANETS[1].z, PLANETS[1].radius, PLANETS[1].hasAtmosphere, eco2);
         this.world.add(planet2.group);
         this.islandGroups.push(planet2);
         this._trackAtmosphere(planet2);
@@ -478,27 +486,27 @@ export default class GameEngine {
         // C1: fresh world DNA for planet 2's flora/fauna shapes
         const planetDNA2 = this.factory.generateWorldDNA();
 
-        for (const pos of clusterPoints(planet2, 10, 3, 2.5)) {
+        for (const pos of clusterPoints(planet2, floraClusters(10, eco2), 3, 2.5)) {
             const e = this.factory.createTree(palette2, 0, 0, this._treeStyleFromDNA(planetDNA2, palette2));
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet2, 8, 2, 2.0)) {
+        for (const pos of clusterPoints(planet2, floraClusters(8, eco2), 2, 2.0)) {
             const e = this.factory.createBush(palette2, 0, 0, this._bushStyleFromDNA(planetDNA2, palette2));
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet2, 4, 2, 1.8)) {
+        for (const pos of clusterPoints(planet2, rockClusters(4, eco2), 2, 1.8)) {
             const e = this.factory.createRock(palette2, 0, 0, this._rockStyleFromDNA(planetDNA2, palette2));
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet2, 12, 5, 2.2)) {
+        for (const pos of clusterPoints(planet2, floraClusters(12, eco2), 5, 2.2)) {
             const e = this.factory.createGrass(palette2, 0, 0, this._grassStyleFromDNA(planetDNA2, palette2));
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet2, 8, 3, 1.5)) {
+        for (const pos of clusterPoints(planet2, floraClusters(8, eco2), 3, 1.5)) {
             const e = this.factory.createFlower(palette2, 0, 0);
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
@@ -522,8 +530,9 @@ export default class GameEngine {
         }
 
         // --- Planet 3: Ancient Peaks (ring 3, cool highlands) ---
-        const palette3 = this.factory.generatePalette(PLANETS[2].palette);
-        const planet3 = this.factory.createPlanet(palette3, PLANETS[2].x, PLANETS[2].y, PLANETS[2].z, PLANETS[2].radius, PLANETS[2].hasAtmosphere);
+        const eco3 = PLANETS[2].eco;
+        const palette3 = this.factory.generatePalette(PLANETS[2].palette, eco3);
+        const planet3 = this.factory.createPlanet(palette3, PLANETS[2].x, PLANETS[2].y, PLANETS[2].z, PLANETS[2].radius, PLANETS[2].hasAtmosphere, eco3);
         this.world.add(planet3.group);
         this.islandGroups.push(planet3);
         this._trackAtmosphere(planet3);
@@ -552,7 +561,7 @@ export default class GameEngine {
         this.placeOnPlanet(golem, planet3, golemPos);
         this.world.add(golem); this.state.entities.push(golem);
         // Big rocks on planet 3 — anywhere except the mountain's footprint
-        for (const pos of clusterPoints(planet3, 5, 2, 2.5, 17)) {
+        for (const pos of clusterPoints(planet3, rockClusters(5, eco3), 2, 2.5, 17)) {
             const rock = this.factory.createRock(palette3, 0, 0, this._rockStyleFromDNA(planetDNA3, palette3));
             this.placeOnPlanet(rock, planet3, pos);
             rock.scale.set(3, 3, 3);
@@ -568,17 +577,17 @@ export default class GameEngine {
             this.state.entities.push(goldRock); this.world.add(goldRock);
         }
         // Vegetation on planet 3
-        for (const pos of clusterPoints(planet3, 8, 2, 2.5, 17)) {
+        for (const pos of clusterPoints(planet3, floraClusters(8, eco3), 2, 2.5, 17)) {
             const e = this.factory.createTree(palette3, 0, 0, this._treeStyleFromDNA(planetDNA3, palette3));
             this.placeOnPlanet(e, planet3, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet3, 12, 5, 2.2, 17)) {
+        for (const pos of clusterPoints(planet3, floraClusters(12, eco3), 5, 2.2, 17)) {
             const e = this.factory.createGrass(palette3, 0, 0, this._grassStyleFromDNA(planetDNA3, palette3));
             this.placeOnPlanet(e, planet3, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet3, 5, 3, 1.5, 17)) {
+        for (const pos of clusterPoints(planet3, floraClusters(5, eco3), 3, 1.5, 17)) {
             const e = this.factory.createFlower(palette3, 0, 0);
             this.placeOnPlanet(e, planet3, pos);
             this.state.entities.push(e); this.world.add(e);
@@ -607,8 +616,9 @@ export default class GameEngine {
         }
 
         // --- Planet 4: Rocky Outpost (ring 0, closest to the sun) ---
-        const palette4 = this.factory.generatePalette(null);
-        const planet4 = this.factory.createPlanet(palette4, PLANETS[3].x, PLANETS[3].y, PLANETS[3].z, PLANETS[3].radius, PLANETS[3].hasAtmosphere);
+        const eco4 = PLANETS[3].eco;
+        const palette4 = this.factory.generatePalette(null, eco4);
+        const planet4 = this.factory.createPlanet(palette4, PLANETS[3].x, PLANETS[3].y, PLANETS[3].z, PLANETS[3].radius, PLANETS[3].hasAtmosphere, eco4);
         this.world.add(planet4.group);
         this.islandGroups.push(planet4);
         this._trackAtmosphere(planet4);
@@ -623,28 +633,29 @@ export default class GameEngine {
         // C1: fresh world DNA for planet 4's flora/fauna shapes
         const planetDNA4 = this.factory.generateWorldDNA();
 
-        for (const pos of clusterPoints(planet4, 4, 2, 2.2)) {
+        for (const pos of clusterPoints(planet4, floraClusters(4, eco4), 2, 2.2)) {
             const e = this.factory.createTree(palette4, 0, 0, this._treeStyleFromDNA(planetDNA4, palette4));
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet4, 3, 2, 2.0)) {
+        for (const pos of clusterPoints(planet4, floraClusters(3, eco4), 2, 2.0)) {
             const e = this.factory.createBush(palette4, 0, 0, this._bushStyleFromDNA(planetDNA4, palette4));
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        // Rocky Outpost — rocks are its identity, give it plenty
-        for (const pos of clusterPoints(planet4, 6, 2, 1.8)) {
+        // Rocky Outpost — rocks are its identity, and its near-zero humidity
+        // pushes the rock multiplier close to its ceiling
+        for (const pos of clusterPoints(planet4, rockClusters(6, eco4), 2, 1.8)) {
             const e = this.factory.createRock(palette4, 0, 0, this._rockStyleFromDNA(planetDNA4, palette4));
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet4, 8, 4, 2.0)) {
+        for (const pos of clusterPoints(planet4, floraClusters(8, eco4), 4, 2.0)) {
             const e = this.factory.createGrass(palette4, 0, 0, this._grassStyleFromDNA(planetDNA4, palette4));
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet4, 4, 2, 1.5)) {
+        for (const pos of clusterPoints(planet4, floraClusters(4, eco4), 2, 1.5)) {
             const e = this.factory.createFlower(palette4, 0, 0);
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
@@ -662,8 +673,9 @@ export default class GameEngine {
         }
 
         // --- Planet 5: Distant World (ring 4, outermost) ---
-        const palette5 = this.factory.generatePalette(null);
-        const planet5 = this.factory.createPlanet(palette5, PLANETS[4].x, PLANETS[4].y, PLANETS[4].z, PLANETS[4].radius, PLANETS[4].hasAtmosphere);
+        const eco5 = PLANETS[4].eco;
+        const palette5 = this.factory.generatePalette(null, eco5);
+        const planet5 = this.factory.createPlanet(palette5, PLANETS[4].x, PLANETS[4].y, PLANETS[4].z, PLANETS[4].radius, PLANETS[4].hasAtmosphere, eco5);
         this.world.add(planet5.group);
         this.islandGroups.push(planet5);
         this._trackAtmosphere(planet5);
@@ -678,27 +690,27 @@ export default class GameEngine {
         // C1: fresh world DNA for planet 5's flora/fauna shapes
         const planetDNA5 = this.factory.generateWorldDNA();
 
-        for (const pos of clusterPoints(planet5, 5, 2, 2.2)) {
+        for (const pos of clusterPoints(planet5, floraClusters(5, eco5), 2, 2.2)) {
             const e = this.factory.createTree(palette5, 0, 0, this._treeStyleFromDNA(planetDNA5, palette5));
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet5, 4, 2, 2.0)) {
+        for (const pos of clusterPoints(planet5, floraClusters(4, eco5), 2, 2.0)) {
             const e = this.factory.createBush(palette5, 0, 0, this._bushStyleFromDNA(planetDNA5, palette5));
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet5, 4, 2, 1.8)) {
+        for (const pos of clusterPoints(planet5, rockClusters(4, eco5), 2, 1.8)) {
             const e = this.factory.createRock(palette5, 0, 0, this._rockStyleFromDNA(planetDNA5, palette5));
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet5, 10, 4, 2.0)) {
+        for (const pos of clusterPoints(planet5, floraClusters(10, eco5), 4, 2.0)) {
             const e = this.factory.createGrass(palette5, 0, 0, this._grassStyleFromDNA(planetDNA5, palette5));
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
         }
-        for (const pos of clusterPoints(planet5, 5, 2, 1.5)) {
+        for (const pos of clusterPoints(planet5, floraClusters(5, eco5), 2, 1.5)) {
             const e = this.factory.createFlower(palette5, 0, 0);
             this.placeOnPlanet(e, planet5, pos);
             this.state.entities.push(e); this.world.add(e);
@@ -808,6 +820,15 @@ export default class GameEngine {
         // re-derive their own tier-scaled hp from their own base hp at hatch time —
         // using the parent's current (possibly damaged) hp would pass the damage along.
         creature.userData.tierHpMult = mod.hp;
+        // Ecosystem temperament: cold outer worlds slow their fauna down, the
+        // scorched inner world speeds it up (neutral at temperature 0.5), and
+        // toxic air makes ambient aggro slightly more likely. Static eco data,
+        // no RNG.
+        const eco = PLANETS[planetIndex].eco;
+        if (eco) {
+            creature.userData.moveSpeed *= 0.7 + 0.6 * eco.temperature;
+            creature.userData.aggroMult *= 1 + 0.3 * eco.toxicity;
+        }
     }
 
     // =====================================================

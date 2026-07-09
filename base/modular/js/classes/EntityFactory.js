@@ -17,24 +17,42 @@ export default class EntityFactory {
 
     getMat(color, flat = true) { return this.world.getMat(color, flat); }
 
-    generatePalette(sphereColor) {
+    /**
+     * Palette hue precedence: explicit sphereColor string > eco temperature >
+     * fully random. Every branch draws exactly one Math.random() so the seeded
+     * RNG consumes the same number of rolls whichever path runs.
+     *
+     * eco (optional, constants.PLANETS[].eco) biases the whole scheme:
+     * temperature maps to base hue (hot ~0.0 scorched red, cold ~0.68 blue),
+     * humidity scales flora/grass saturation (dry worlds read washed-out),
+     * lightLevel scales terrain/flora lightness (outer worlds read darker).
+     */
+    generatePalette(sphereColor, eco = null) {
         let hue;
-        if (!sphereColor) hue = Math.random();
-        else {
+        if (sphereColor) {
             let base = sphereColor === 'red' ? 0.95 : sphereColor === 'blue' ? 0.6 : 0.1;
             hue = (base + (Math.random() - 0.5) * 0.3) % 1;
             if (hue < 0) hue += 1;
+        } else if (eco) {
+            // Tighter jitter than the string branch: eco worlds should stay
+            // recognizably in-theme across reseeds (a scorched world must
+            // never roll green).
+            hue = (0.68 * (1 - eco.temperature) + (Math.random() - 0.5) * 0.12 + 1) % 1;
+        } else {
+            hue = Math.random();
         }
-        const baseDark = new THREE.Color().setHSL(hue, 0.2, 0.15);
-        const soil = new THREE.Color().setHSL((hue + 0.05) % 1, 0.3, 0.25);
+        const satMult = eco ? 0.6 + 0.4 * eco.humidity : 1;
+        const lightMult = eco ? 0.55 + 0.45 * eco.lightLevel : 1;
+        const baseDark = new THREE.Color().setHSL(hue, 0.2, 0.15 * lightMult);
+        const soil = new THREE.Color().setHSL((hue + 0.05) % 1, 0.3, 0.25 * lightMult);
         const floraHue = (hue + 0.2 + Math.random() * 0.4) % 1;
-        const flora = new THREE.Color().setHSL(floraHue, 0.5 + Math.random() * 0.4, 0.3 + Math.random() * 0.3);
+        const flora = new THREE.Color().setHSL(floraHue, (0.5 + Math.random() * 0.4) * satMult, (0.3 + Math.random() * 0.3) * lightMult);
         const groundTop = flora.clone().multiplyScalar(0.75);
         // Grass gets its own hue derived from flora (shifted warmer, slightly
         // different sat/light) so ground cover reads as a distinct material
         // from tree canopy instead of aliasing to the same color.
         const grassHue = (floraHue + 0.06 + Math.random() * 0.04) % 1;
-        const tallGrass = new THREE.Color().setHSL(grassHue, 0.55 + Math.random() * 0.35, 0.32 + Math.random() * 0.28);
+        const tallGrass = new THREE.Color().setHSL(grassHue, (0.55 + Math.random() * 0.35) * satMult, (0.32 + Math.random() * 0.28) * lightMult);
         const creatureHue = (floraHue + 0.5) % 1;
         const creature = new THREE.Color().setHSL(creatureHue, 0.8, 0.6);
         const accent = new THREE.Color().setHSL((creatureHue + 0.2) % 1, 0.9, 0.6);
@@ -370,7 +388,7 @@ export default class EntityFactory {
      * @param {boolean} hasAtmosphere - Whether to render atmosphere glow
      * @returns {{ group, groundMesh, center, radius }}
      */
-    createPlanet(palette, cx, cy, cz, radius, hasAtmosphere = false) {
+    createPlanet(palette, cx, cy, cz, radius, hasAtmosphere = false, eco = null) {
         const g = new THREE.Group();
         // C4: flat detail cap for every planet. The old radius-scaled formula
         // (up to 6) put planet 3 (r=30) at ~246K tris across its 3 layers; at
@@ -456,7 +474,16 @@ export default class EntityFactory {
             // uFade now hides that case entirely, but the from-space rim itself was
             // also a bit hot — trimmed the ceiling so the glow stays a rim accent,
             // not a wash, once fully faded in.
-            const atmosIntensity = 0.7 + Math.abs(Math.sin(seed * 1.7)) * 0.3; // 0.7-1.0
+            let atmosIntensity = 0.7 + Math.abs(Math.sin(seed * 1.7)) * 0.3; // 0.7-1.0
+            // Ecosystem identity on the shell (static eco data, no RNG): toxic
+            // worlds get a sickly green haze, cold worlds shift toward pale ice
+            // blue, humid worlds read denser. Ceiling 1.1 keeps the humid boost
+            // from re-introducing the flat-veil wash trimmed above.
+            if (eco) {
+                if (eco.toxicity > 0) atmosColor.lerp(new THREE.Color(0x7dff5a), eco.toxicity * 0.6);
+                else atmosColor.lerp(new THREE.Color(0xa8d8ff), (1 - eco.temperature) * 0.35);
+                atmosIntensity = Math.min(1.1, atmosIntensity * (0.8 + 0.4 * eco.humidity));
+            }
             const atmosMat = new THREE.ShaderMaterial({
                 uniforms: {
                     color: { value: atmosColor },

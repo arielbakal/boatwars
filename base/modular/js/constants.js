@@ -155,12 +155,24 @@ export const MINE_DROP_COUNT = 3;
 // Difficulty follows the spiral in both directions from the temperate tutorial
 // ring: ring 0 (Rocky Outpost, closest to the sun) is the hostile hardest-reward
 // world; rings 2-4 get progressively harder/colder going outward.
+// Each planet carries an `eco` block derived from its ring distance — the
+// knobs every ecosystem consumer reads (all 0..1 except lightLevel, a plain
+// multiplier). Static data, no RNG: deterministic for multiplayer.
+//   humidity    → flora density up, rock density down, atmosphere thickness
+//   temperature → palette base hue (hot=scorched red, cold=blue), creature speed
+//   toxicity    → atmosphere tint shifts sickly green, ambient aggro up
+//   lightLevel  → palette lightness and (on the surface) scene light dimming
 export const PLANETS = [
-    { name: "STARTING PLANET", x: 86, y: 0, z: 123, radius: 15, hasAtmosphere: true, palette: null, tier: 0, ring: 1, sunDistance: 150 },
-    { name: "FLORA WORLD", x: -67, y: 15, z: 183, radius: 18, hasAtmosphere: true, palette: null, tier: 1, ring: 2, sunDistance: 195 },
-    { name: "ANCIENT PEAKS", x: -237, y: -25, z: 63, radius: 30, hasAtmosphere: true, palette: 'blue', tier: 2, ring: 3, sunDistance: 245 },
-    { name: "ROCKY OUTPOST", x: 110, y: 10, z: 0, radius: 14, hasAtmosphere: true, palette: null, tier: 3, ring: 0, sunDistance: 110 },
-    { name: "DISTANT WORLD", x: -230, y: 35, z: -193, radius: 16, hasAtmosphere: true, palette: null, tier: 3, ring: 4, sunDistance: 300 }
+    { name: "STARTING PLANET", x: 86, y: 0, z: 123, radius: 15, hasAtmosphere: true, palette: null, tier: 0, ring: 1, sunDistance: 150,
+      eco: { humidity: 0.55, temperature: 0.55, toxicity: 0, lightLevel: 1.0 } },
+    { name: "FLORA WORLD", x: -67, y: 15, z: 183, radius: 18, hasAtmosphere: true, palette: null, tier: 1, ring: 2, sunDistance: 195,
+      eco: { humidity: 0.95, temperature: 0.5, toxicity: 0, lightLevel: 0.95 } },
+    { name: "ANCIENT PEAKS", x: -237, y: -25, z: 63, radius: 30, hasAtmosphere: true, palette: 'blue', tier: 2, ring: 3, sunDistance: 245,
+      eco: { humidity: 0.35, temperature: 0.25, toxicity: 0, lightLevel: 0.75 } },
+    { name: "ROCKY OUTPOST", x: 110, y: 10, z: 0, radius: 14, hasAtmosphere: true, palette: null, tier: 3, ring: 0, sunDistance: 110,
+      eco: { humidity: 0.05, temperature: 0.95, toxicity: 0.7, lightLevel: 1.15 } },
+    { name: "DISTANT WORLD", x: -230, y: 35, z: -193, radius: 16, hasAtmosphere: true, palette: null, tier: 3, ring: 4, sunDistance: 300,
+      eco: { humidity: 0.2, temperature: 0.08, toxicity: 0.1, lightLevel: 0.45 } }
 ];
 
 // Per-tier creature difficulty multipliers (index = PLANETS[].tier). Deterministic —
