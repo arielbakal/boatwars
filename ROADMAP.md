@@ -2,6 +2,15 @@
 
 Design vision captured during the 2026-07-08 live playtest session. Target: implement in the next session(s).
 
+**Status: IMPLEMENTED** (commits e73d184..7fa9e03). All 5 steps shipped: spiral
+ring layout around the sun at origin, tier remap, per-planet eco parameter
+blocks, signature features (ponds / heat aura + embers / dim light), and
+ring-exclusive fire/frost crystals that drop stat essences. Verified with a
+two-client headless probe: identical seeded worlds, zero console errors.
+Known follow-up: a mined crystal's essence only spawns on the miner's client
+(mirrors pre-existing creature-essence behavior) — design decision pending on
+whether essences should replicate to all clients.
+
 ## Vision
 
 Turn the world from "5 random planets in a vacuum" into a **solar system**:
