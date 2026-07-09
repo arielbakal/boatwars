@@ -238,11 +238,12 @@ export default class CombatSystem {
             if (child.material && child.material.emissive) {
                 // Restore target must be the material's TRUE base emissive: prefer an
                 // in-flight flash's saved base, then the highlight system's saved base
-                // (InputHandler.setHighlight), then the live value. Capturing the live
-                // hex blindly would bake an active highlight/flash tint into the
-                // restore and leave the entity stuck tinted after both effects end.
+                // (InputHandler.setHighlight stores it on material.userData), then the
+                // live value. Capturing the live hex blindly would bake an active
+                // highlight/flash tint into the restore and leave the entity stuck
+                // tinted after both effects end.
                 const trueOrig = child.userData._flashOrig !== undefined ? child.userData._flashOrig
-                    : child.userData._origEmissive !== undefined ? child.userData._origEmissive
+                    : child.material.userData._origEmissive !== undefined ? child.material.userData._origEmissive
                     : child.material.emissive.getHex();
                 child.userData._flashOrig = trueOrig;
                 originalEmissives.push({ child, mat: child.material, orig: trueOrig });

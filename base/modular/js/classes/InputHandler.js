@@ -788,30 +788,36 @@ export default class InputHandler {
     }
 
     /**
-     * Toggle the highlight glow on an interactable entity. Saves each child's
-     * original emissive hex the first time it's highlighted and restores it on
-     * unhighlight (mirrors CombatSystem._flashEntity's save/restore pattern) — a
-     * flat 0x000000 reset would otherwise permanently kill a legitimately
-     * emissive material, e.g. gold ore's 0xffd700 glow, the first time it's
-     * highlighted and released.
+     * Toggle the highlight glow on an interactable entity. Saves each
+     * material's original emissive hex the first time it's highlighted and
+     * restores it on unhighlight — a flat 0x000000 reset would otherwise
+     * permanently kill a legitimately emissive material, e.g. gold ore's
+     * 0xffd700 glow, the first time it's highlighted and released.
+     *
+     * The cache lives on MATERIAL.userData, not child.userData: gold rocks
+     * and ring crystals share one emissive material across several meshes,
+     * and a per-child cache made every child after the first save the
+     * already-stomped highlight color as its "original", leaving the glow
+     * stuck grey after one highlight. Material-level storage also keeps the
+     * saved base visible to CombatSystem._flashEntity's fallback chain.
      */
     setHighlight(entity, on) {
         entity.traverse(child => {
             if (child.material && child.material.emissive) {
+                const mat = child.material;
                 if (on) {
-                    if (child.userData._origEmissive === undefined) {
+                    if (mat.userData._origEmissive === undefined) {
                         // If a combat flash is live on this material, its saved base is
                         // the truth — the live hex is the flash color, and saving that
                         // would restore the flash tint permanently on unhighlight.
-                        child.userData._origEmissive = child.userData._flashOrig !== undefined
+                        mat.userData._origEmissive = child.userData._flashOrig !== undefined
                             ? child.userData._flashOrig
-                            : child.material.emissive.getHex();
+                            : mat.emissive.getHex();
                     }
-                    child.material.emissive.setHex(0x222222);
-                } else {
-                    const orig = child.userData._origEmissive;
-                    child.material.emissive.setHex(orig !== undefined ? orig : 0x000000);
-                    delete child.userData._origEmissive;
+                    mat.emissive.setHex(0x222222);
+                } else if (mat.userData._origEmissive !== undefined) {
+                    mat.emissive.setHex(mat.userData._origEmissive);
+                    delete mat.userData._origEmissive;
                 }
             }
         });
