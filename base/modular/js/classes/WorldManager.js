@@ -39,14 +39,18 @@ export default class WorldManager {
     }
 
     setupLighting() {
-        // Ambient - dimmer for space
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-        this.scene.add(ambientLight);
+        // Ambient - dimmer for space. Instance fields (plus their base
+        // intensities) so GameEngine.animate can scale surface lighting by
+        // the local planet's eco.lightLevel each frame.
+        this.ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        this.ambientBaseIntensity = 0.4;
+        this.scene.add(this.ambientLight);
 
         // Distant sun (directional)
-        const sunLight = new THREE.DirectionalLight(0xffffee, 1.0);
-        sunLight.position.set(200, 100, 50);
-        this.scene.add(sunLight);
+        this.sunLight = new THREE.DirectionalLight(0xffffee, 1.0);
+        this.sunBaseIntensity = 1.0;
+        this.sunLight.position.set(200, 100, 50);
+        this.scene.add(this.sunLight);
 
         // Secondary fill light from opposite side
         const fillLight = new THREE.DirectionalLight(0x4466aa, 0.3);

@@ -57,6 +57,10 @@ export default class GameState {
         // Multi-island data (populated by GameEngine)
         this.islands = [];
         this.lastIslandName = null;
+        // Island entry the player is currently at (set each frame by
+        // GameEngine.updateIslandIndicator; null in open space). Read by the
+        // per-planet surface lighting in animate().
+        this.currentIsland = null;
 
         // Resources
         this.resources = { logs: 0 };

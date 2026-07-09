@@ -26,6 +26,7 @@ import RemotePlayerManager from '../network/RemotePlayerManager.js';
 import SeededRandom from '../network/SeededRandom.js';
 
 import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV, RENDER_SCALE, STACKS_BY_TYPE, SHIP_LOG_CLUSTER_RADIUS, SUN_POSITION, SUN_RADIUS } from '../constants.js';
+import { smoothFactor } from './Easing.js';
 
 export default class GameEngine {
     constructor() {
@@ -912,6 +913,10 @@ export default class GameEngine {
             }
         }
 
+        // Exposed for the per-planet surface lighting in animate() — null in
+        // open space, where lighting eases back to its baseline.
+        state.currentIsland = currentIsland;
+
         if (currentIsland) {
             if (state.lastIslandName !== currentIsland.name) {
                 state.lastIslandName = currentIsland.name;
@@ -1285,6 +1290,18 @@ export default class GameEngine {
                 // Combat
                 this.combatSystem.update(dt, ctx);
                 this.updateIslandIndicator();
+
+                // Surface lighting follows the local ecosystem: the outermost
+                // worlds are dim, the scorched inner world glares. Eased so
+                // entering/leaving a planet fades instead of popping, and
+                // open space drifts back to the baseline (lightLevel 1).
+                const lightLevel = (state.currentIsland && state.currentIsland.eco)
+                    ? state.currentIsland.eco.lightLevel : 1.0;
+                const lightEase = smoothFactor(0.04, dt);
+                this.world.ambientLight.intensity = THREE.MathUtils.lerp(
+                    this.world.ambientLight.intensity, this.world.ambientBaseIntensity * lightLevel, lightEase);
+                this.world.sunLight.intensity = THREE.MathUtils.lerp(
+                    this.world.sunLight.intensity, this.world.sunBaseIntensity * lightLevel, lightEase);
 
                 // Entity AI
                 this.entityAISystem.update(dt, ctx);
