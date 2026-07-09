@@ -709,6 +709,36 @@ export default class EntityFactory {
         return g;
     }
 
+    /**
+     * Stylized pond: two stacked discs — a dark shore ring under a lighter,
+     * slightly transparent water disc — that hug the local terrain via
+     * placeOnPlanet's height sampling. Water is a fixed stylized blue rather
+     * than a palette color so humid worlds read as "has water" at a glance.
+     * Flat discs on bumpy FBM terrain intersect the ground here and there;
+     * that reads as water meeting its banks, which is the point. RNG-free —
+     * size variety comes from the caller's scale roll.
+     */
+    createPond(p, x, z, scale = 1.0) {
+        const g = new THREE.Group();
+        const shore = new THREE.Mesh(
+            new THREE.CircleGeometry(1.35 * scale, 18),
+            this.getMat(p.soil.clone().lerp(new THREE.Color(0x223344), 0.4))
+        );
+        shore.rotation.x = -Math.PI / 2;
+        shore.position.y = 0.04;
+        g.add(shore);
+        const water = new THREE.Mesh(
+            new THREE.CircleGeometry(1.1 * scale, 18),
+            new THREE.MeshToonMaterial({ color: 0x3f9df5, transparent: true, opacity: 0.85 })
+        );
+        water.rotation.x = -Math.PI / 2;
+        water.position.y = 0.09;
+        g.add(water);
+        g.position.set(x, 0, z);
+        g.userData = { type: 'pond', radius: 1.35 * scale, heightOffset: 0.05 };
+        return g;
+    }
+
     createTree(p, x, z, style = null) {
         const g = new THREE.Group();
         const dna = style || {

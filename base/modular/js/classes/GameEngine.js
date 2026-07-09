@@ -511,6 +511,21 @@ export default class GameEngine {
             this.placeOnPlanet(e, planet2, pos);
             this.state.entities.push(e); this.world.add(e);
         }
+        // Signature feature: ponds — the humid world's water, each ringed by a
+        // few extra bushes. Fixed loop counts keep the seeded RNG draw
+        // sequence identical on every client.
+        for (let i = 0; i < 4; i++) {
+            const pondPos = rndAnywhere(planet2);
+            const pond = this.factory.createPond(palette2, 0, 0, 1.4 + Math.random() * 0.9);
+            this.placeOnPlanet(pond, planet2, pondPos);
+            this.state.entities.push(pond); this.world.add(pond);
+            for (let b = 0; b < 3; b++) {
+                const bushPos = SphericalUtils.randomSurfacePointNear(planet2, pondPos, 2.6, 4.0);
+                const bush = this.factory.createBush(palette2, 0, 0, this._bushStyleFromDNA(planetDNA2, palette2));
+                this.placeOnPlanet(bush, planet2, bushPos);
+                this.state.entities.push(bush); this.world.add(bush);
+            }
+        }
         // Pickaxe on planet 2
         const pickPos = rndSurface(planet2, 2.0, 13.0);
         const pickaxe = this.factory.createPickaxe(palette2, 0, 0);
