@@ -397,7 +397,8 @@ export default class GameEngine {
             radius: planet1.radius,
             groundMesh: planet1.groundMesh, // Real displaced surface mesh for terrain sampling
             floorY: 0, // Legacy, not used in spherical mode
-            name: PLANETS[0].name
+            name: PLANETS[0].name,
+            eco: PLANETS[0].eco // read per-frame by surface hazards and lighting
         });
 
         // C1: fresh world DNA for planet 1's flora/fauna shapes
@@ -481,7 +482,8 @@ export default class GameEngine {
             radius: planet2.radius,
             groundMesh: planet2.groundMesh,
             floorY: 0,
-            name: PLANETS[1].name
+            name: PLANETS[1].name,
+            eco: PLANETS[1].eco
         });
         // C1: fresh world DNA for planet 2's flora/fauna shapes
         const planetDNA2 = this.factory.generateWorldDNA();
@@ -557,7 +559,8 @@ export default class GameEngine {
             radius: planet3.radius,
             groundMesh: planet3.groundMesh,
             floorY: 0,
-            name: PLANETS[2].name
+            name: PLANETS[2].name,
+            eco: PLANETS[2].eco
         });
         // C1: fresh world DNA for planet 3's flora/fauna shapes
         const planetDNA3 = this.factory.generateWorldDNA();
@@ -643,7 +646,8 @@ export default class GameEngine {
             radius: planet4.radius,
             groundMesh: planet4.groundMesh,
             floorY: 0,
-            name: PLANETS[3].name
+            name: PLANETS[3].name,
+            eco: PLANETS[3].eco
         });
         // C1: fresh world DNA for planet 4's flora/fauna shapes
         const planetDNA4 = this.factory.generateWorldDNA();
@@ -675,6 +679,13 @@ export default class GameEngine {
             this.placeOnPlanet(e, planet4, pos);
             this.state.entities.push(e); this.world.add(e);
         }
+        // Signature feature: glowing ember shards — self-lit litter marking
+        // the scorched world (static cheap stand-in for drifting embers).
+        for (const pos of clusterPoints(planet4, 6, 3, 1.6)) {
+            const ember = this.factory.createEmberShard(0.8 + Math.random() * 0.8);
+            this.placeOnPlanet(ember, planet4, pos);
+            this.state.entities.push(ember); this.world.add(ember);
+        }
         for (let i = 0; i < 3; i++) {
             const pos = rndAnywhere(planet4);
             const creatureDNA = this.factory.generateCreatureDNA(palette4, speciesTypes[i]);
@@ -700,7 +711,8 @@ export default class GameEngine {
             radius: planet5.radius,
             groundMesh: planet5.groundMesh,
             floorY: 0,
-            name: PLANETS[4].name
+            name: PLANETS[4].name,
+            eco: PLANETS[4].eco
         });
         // C1: fresh world DNA for planet 5's flora/fauna shapes
         const planetDNA5 = this.factory.generateWorldDNA();

@@ -710,6 +710,30 @@ export default class EntityFactory {
     }
 
     /**
+     * Ember shard: a small pair of self-lit tetrahedra for scorched worlds.
+     * MeshBasicMaterial ignores scene lighting, so shards glow against the
+     * dark rock — the cheap static stand-in for drifting ember particles.
+     */
+    createEmberShard(scale = 1.0) {
+        const g = new THREE.Group();
+        const shard = new THREE.Mesh(
+            new THREE.TetrahedronGeometry(0.3 * scale, 0),
+            new THREE.MeshBasicMaterial({ color: 0xff5522 })
+        );
+        shard.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+        g.add(shard);
+        const core = new THREE.Mesh(
+            new THREE.TetrahedronGeometry(0.16 * scale, 0),
+            new THREE.MeshBasicMaterial({ color: 0xffcc55 })
+        );
+        core.position.set(0.18 * scale, 0.08 * scale, -0.08 * scale);
+        core.rotation.set(Math.random() * Math.PI, 0, Math.random() * Math.PI);
+        g.add(core);
+        g.userData = { type: 'ember', radius: 0.3 * scale, heightOffset: 0.12 * scale };
+        return g;
+    }
+
+    /**
      * Stylized pond: two stacked discs — a dark shore ring under a lighter,
      * slightly transparent water disc — that hug the local terrain via
      * placeOnPlanet's height sampling. Water is a fixed stylized blue rather

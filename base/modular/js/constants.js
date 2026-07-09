@@ -215,6 +215,15 @@ export const SUN_DAMAGE_MIN = 1;     // hp per tick at the zone edge
 export const SUN_DAMAGE_MAX = 5;     // hp per tick hugging the surface
 export const SUN_DAMAGE_TICK = 0.5;  // seconds between heat ticks
 
+// Ambient surface heat on scorched worlds (eco.temperature at or above the
+// threshold). Reuses the sun hazard's tick pattern with gentle values —
+// survival pressure on the innermost ring, not a wall: 1 hp every 3 s gives
+// a 20 hp player a full minute before health essences even matter.
+export const PLANET_HEAT_TEMP_THRESHOLD = 0.8;
+export const PLANET_HEAT_RANGE = 6;  // heat extends this far above the nominal surface
+export const PLANET_HEAT_DAMAGE = 1; // hp per tick
+export const PLANET_HEAT_TICK = 3.0; // seconds between ticks
+
 // Creature combat
 export const CREATURE_HP = 6;
 export const CREATURE_CONTACT_DAMAGE = 2;

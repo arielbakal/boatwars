@@ -12,7 +12,8 @@ import {
     CREATURE_ESSENCE_MAP, ATTACK_SWING_DURATION,
     ESSENCE_ATTACK_CAP_MULT, ESSENCE_MAX_HP_CAP_MULT, PLAYER_SPEED_BOOST_CAP,
     SWORD_ATTACK_BONUS,
-    SUN_RADIUS, SUN_DAMAGE_RADIUS, SUN_DAMAGE_MIN, SUN_DAMAGE_MAX, SUN_DAMAGE_TICK
+    SUN_RADIUS, SUN_DAMAGE_RADIUS, SUN_DAMAGE_MIN, SUN_DAMAGE_MAX, SUN_DAMAGE_TICK,
+    PLANET_HEAT_TEMP_THRESHOLD, PLANET_HEAT_RANGE, PLANET_HEAT_DAMAGE, PLANET_HEAT_TICK
 } from '../constants.js';
 import SphericalUtils from '../classes/SphericalUtils.js';
 import { smoothFactor } from '../classes/Easing.js';
@@ -52,6 +53,7 @@ export default class CombatSystem {
         this._updateCreatureAggro(dt, state, ctx);
         this._updateCreatureContact(dt, ctx);
         this._updateSunHazard(dt, ctx);
+        this._updatePlanetHeat(dt, ctx);
         this._updateStatBoosts(dt, state, ctx.world, ctx.audio, ctx.factory, ctx.t);
         this._updateUI(state);
     }
@@ -373,6 +375,34 @@ export default class CombatSystem {
         );
         const damage = Math.round(THREE.MathUtils.lerp(SUN_DAMAGE_MIN, SUN_DAMAGE_MAX, heat));
         this._damagePlayer(damage, ctx, null);
+    }
+
+    /**
+     * Ambient surface heat on scorched worlds: within PLANET_HEAT_RANGE of a
+     * planet whose eco.temperature reaches PLANET_HEAT_TEMP_THRESHOLD, damage
+     * ticks every PLANET_HEAT_TICK seconds. Same single-timer pattern as
+     * _updateSunHazard — the player can only be near one planet's surface at
+     * a time, so one timer suffices even with several hot worlds. No
+     * knockback (sourcePos null), same reasoning as the sun.
+     */
+    _updatePlanetHeat(dt, ctx) {
+        const { state } = ctx;
+        let onHotWorld = false;
+        for (const island of state.islands) {
+            if (!island.eco || island.eco.temperature < PLANET_HEAT_TEMP_THRESHOLD) continue;
+            if (state.player.pos.distanceTo(island.center) < island.radius + PLANET_HEAT_RANGE) {
+                onHotWorld = true;
+                break;
+            }
+        }
+        if (!onHotWorld) {
+            this._planetHeatTimer = 0;
+            return;
+        }
+        this._planetHeatTimer = (this._planetHeatTimer || 0) + dt;
+        if (this._planetHeatTimer < PLANET_HEAT_TICK) return;
+        this._planetHeatTimer = 0;
+        this._damagePlayer(PLANET_HEAT_DAMAGE, ctx, null);
     }
 
     _updateCreatureContact(dt, ctx) {
