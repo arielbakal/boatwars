@@ -2,11 +2,12 @@
 
 ## Overview
 
-The multiplayer system enables real-time co-op gameplay via WebSockets. Players can:
-- See each other as colored blocky characters
+The multiplayer system enables real-time co-op gameplay via WebSockets. Entry is multiplayer-first: on page load a name overlay (`#join-overlay`) gates the game, and the client auto-connects to the same-origin WebSocket server. Players can:
+- Join with a display name (server-validated: trimmed, max 16 chars, unique case-insensitively)
+- See each other as colored blocky characters with nametags
 - See each other's movements in real-time
 - Share world changes (tree chopping, rock mining)
-- Chat (UI ready, server relay implemented)
+- Chat with player names shown on each line
 
 ---
 
@@ -24,17 +25,25 @@ The multiplayer system enables real-time co-op gameplay via WebSockets. Players 
 
 ### Connection Flow
 
+The server is authoritative over joining: a fresh connection is "pending" and gets nothing until it sends a valid `join {name}`. Pending sockets are excluded from all broadcasts and closed after 30s without a valid join.
+
 ```
-Client                    Server                    Other Clients
-  |                          |                           |
-  |--- connect() ---------->|                           |
-  |<-- welcome (id, seed) --|                           |
-  |                          |                           |
-  |--- player_state ------->|                           |
-  |                          |--- player_state --------->|
-  |                          |                           |
-  |                          |<-- player_state ---------|
-  |<------------------------|                           |
+Client                     Server                     Other Clients
+  |                           |                            |
+  |--- connect() ----------->|                            |
+  |--- join {name} --------->|                            |
+  |                           | validate: non-empty,       |
+  |                           | <=16 chars, unique name    |
+  |                           |                            |
+  |<-- join_error (reason) --|  rejected: socket stays    |
+  |                           |  open, client may retry    |
+  |          OR               |                            |
+  |<-- welcome (id, name, ---|  accepted                  |
+  |     seed, playerCount)    |--- player_join (name) ---->|
+  |<-- player_join (roster) -|                            |
+  |                           |                            |
+  |--- player_state -------->|                            |
+  |                           |--- player_state ---------->|
 ```
 
 ---
@@ -50,15 +59,20 @@ constructor() {
     this.ws = null;
     this.connected = false;
     this.playerId = null;
-    this.remotePlayers = new Map();
-    
+    this.playerName = null;           // server-accepted name (set on welcome)
+    this.remotePlayers = new Map();   // id → { name, position, rotation, state }
+
     // Callbacks (set by GameEngine)
-    this.onPlayerJoin = null;
-    this.onPlayerLeave = null;
-    this.onPlayerUpdate = null;
-    this.onWorldEvent = null;
-    this.onWelcome = null;
-    
+    this.onPlayerJoin = null;         // callback(id, data)
+    this.onPlayerLeave = null;        // callback(id, data)
+    this.onPlayerUpdate = null;       // callback(id, data)
+    this.onWorldEvent = null;         // callback(event)
+    this.onWelcome = null;            // callback(data) - receives seed, playerCount
+    this.onJoinError = null;          // callback(reason) - join rejected by server
+    this.onDisconnect = null;         // callback(wasJoined) - socket closed
+    this.onInventoryUpdate = null;    // callback(id, data)
+    this.onChat = null;               // callback(playerId, text, name)
+
     this._sendQueue = [];
     this._lastSendTime = 0;
     this.SEND_RATE = 1000 / 20;  // 20 ticks/sec
@@ -87,7 +101,11 @@ connect(url) {
         this.ws.onclose = () => {
             this.connected = false;
             this.remotePlayers.clear();
+            const wasJoined = this.playerId !== null;
+            this.playerId = null;
+            this.playerName = null;
             console.log('[Network] Disconnected');
+            if (this.onDisconnect) this.onDisconnect(wasJoined);
         };
         
         this.ws.onerror = (err) => {
@@ -97,6 +115,18 @@ connect(url) {
     });
 }
 ```
+
+### Joining
+
+`connect()` only opens the socket — the server sends nothing until the client requests to join:
+
+```javascript
+join(name) {
+    this._send(MessageProtocol.encode({ type: 'join', name }));
+}
+```
+
+The server replies with either `welcome` (accepted) or `join_error` with a `reason` (`invalid_name` or `name_taken`). On rejection the socket stays open so the player can retry with another name on the same connection.
 
 ### Sending Player State
 
@@ -147,12 +177,18 @@ _handleMessage(raw) {
     switch (msg.type) {
         case 'welcome':
             this.playerId = msg.id;
+            this.playerName = msg.name || null;
             this.worldSeed = msg.seed || null;
             if (this.onWelcome) this.onWelcome(msg);
             break;
-            
+
+        case 'join_error':
+            if (this.onJoinError) this.onJoinError(msg.reason);
+            break;
+
         case 'player_join':
             this.remotePlayers.set(msg.id, {
+                name: msg.name || null,
                 position: msg.position,
                 rotation: msg.rotation
             });
@@ -161,7 +197,7 @@ _handleMessage(raw) {
             
         case 'player_leave':
             this.remotePlayers.delete(msg.id);
-            if (this.onPlayerLeave) this.onPlayerLeave(msg.id);
+            if (this.onPlayerLeave) this.onPlayerLeave(msg.id, msg);
             break;
             
         case 'player_state':
@@ -178,6 +214,11 @@ _handleMessage(raw) {
         case 'world_event':
             if (this.onWorldEvent) this.onWorldEvent(msg);
             break;
+
+        case 'chat':
+            // Server relay shape: { type: 'chat', playerId, name, text }
+            if (this.onChat) this.onChat(msg.playerId, msg.text, msg.name);
+            break;
     }
 }
 ```
@@ -192,7 +233,7 @@ _handleMessage(raw) {
 
 - Create 3D models for remote players
 - Interpolate position/rotation
-- Update nametags
+- Render nametag sprites showing the player's chosen name (falls back to `Player {id}`; the font auto-shrinks so long names fit the 256px canvas)
 
 ### Player Colors
 
@@ -236,7 +277,7 @@ group (THREE.Group)
 addPlayer(id, data) {
     if (this.players.has(id)) return;
     
-    const model = this._buildModel(id);
+    const model = this._buildModel(id, data.name);
     const pos = data.position || { x: 0, y: 0, z: 0 };
     model.group.position.set(pos.x, pos.y, pos.z);
     
@@ -244,6 +285,7 @@ addPlayer(id, data) {
     
     this.players.set(id, {
         ...model,
+        name: data.name || null,
         targetPos: new THREE.Vector3(pos.x, pos.y, pos.z),
         currentPos: new THREE.Vector3(pos.x, pos.y, pos.z),
         targetRot: data.rotation || 0,
@@ -405,43 +447,85 @@ const httpServer = http.createServer((req, res) => {
     });
 });
 
-httpServer.listen(3000);
+httpServer.listen(PORT);  // PORT env var, default 3000
 ```
 
 ### WebSocket Server
 
+HTTP and WebSocket share the same port — the ws server attaches to the HTTP server and handles upgrade requests:
+
 ```javascript
-const wss = new WebSocketServer({ port: 3001 });
+const wss = new WebSocketServer({ server: httpServer });
 
 let nextPlayerId = 1;
-const players = new Map();
+const players = new Map(); // ws → { id, name, position, rotation }
+
+const MAX_NAME_LENGTH = 16;
+const JOIN_TIMEOUT_MS = 30000;
+
 let worldSeed = Math.floor(Math.random() * 0xFFFFFF);
 
 wss.on('connection', (ws) => {
-    const playerId = nextPlayerId++;
-    const playerData = { id: playerId, position: {x:0,y:0,z:0}, rotation: 0 };
-    players.set(ws, playerData);
-    
-    // Send welcome with ID and seed
-    ws.send(JSON.stringify({ 
-        type: 'welcome', 
-        id: playerId, 
-        seed: worldSeed,
-        playerCount: players.size 
-    }));
-    
-    // Notify others
-    broadcast(ws, JSON.stringify({
-        type: 'player_join',
-        id: playerId,
-        position: playerData.position,
-        rotation: playerData.rotation
-    }));
-    
-    // Handle messages
+    // Server-authoritative join: a connection stays "pending" until it sends a
+    // valid `join {name}`. Pending sockets are not in the players map, receive
+    // no welcome and no broadcasts, and are dropped after JOIN_TIMEOUT_MS.
+    let playerData = null;
+
+    const joinTimeout = setTimeout(() => {
+        if (!playerData) ws.close();
+    }, JOIN_TIMEOUT_MS);
+
+    function handleJoin(msg) {
+        const name = String(msg.name ?? '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, MAX_NAME_LENGTH);
+        if (!name) {
+            ws.send(JSON.stringify({ type: 'join_error', reason: 'invalid_name' }));
+            return;
+        }
+        const taken = [...players.values()].some(
+            p => p.name.toLowerCase() === name.toLowerCase()
+        );
+        if (taken) {
+            ws.send(JSON.stringify({ type: 'join_error', reason: 'name_taken' }));
+            return;
+        }
+
+        clearTimeout(joinTimeout);
+        playerData = { id: nextPlayerId++, name, position: { x: 0, y: 0, z: 0 }, rotation: 0 };
+        players.set(ws, playerData);
+
+        // Accepted: welcome (id, name, seed), announce to others, send roster
+        ws.send(JSON.stringify({
+            type: 'welcome', id: playerData.id, name, seed: worldSeed, playerCount: players.size
+        }));
+        broadcast(ws, JSON.stringify({
+            type: 'player_join', id: playerData.id, name,
+            position: playerData.position, rotation: playerData.rotation
+        }));
+        for (const [otherWs, otherData] of players) {
+            if (otherWs !== ws && otherWs.readyState === 1) {
+                ws.send(JSON.stringify({
+                    type: 'player_join', id: otherData.id, name: otherData.name,
+                    position: otherData.position, rotation: otherData.rotation,
+                    inventory: otherData.inventory || null,
+                    selectedSlot: otherData.selectedSlot ?? null
+                }));
+            }
+        }
+    }
+
     ws.on('message', (raw) => {
         const msg = JSON.parse(raw);
-        
+
+        // Until joined, the ONLY accepted message is `join`
+        if (!playerData) {
+            if (msg.type === 'join') handleJoin(msg);
+            return;
+        }
+
+        const playerId = playerData.id;
         switch (msg.type) {
             case 'player_state':
                 playerData.position = msg.position;
@@ -464,14 +548,23 @@ wss.on('connection', (ws) => {
                     ...msg
                 }));
                 break;
+
+            case 'chat':
+                broadcast(null, JSON.stringify({
+                    type: 'chat', playerId, name: playerData.name, text: msg.text
+                }));
+                break;
         }
     });
     
     ws.on('close', () => {
+        clearTimeout(joinTimeout);
+        if (!playerData) return; // pending socket never joined — nothing to announce
         players.delete(ws);
         broadcast(null, JSON.stringify({
             type: 'player_leave',
-            id: playerId
+            id: playerData.id,
+            name: playerData.name
         }));
     });
 });
@@ -547,46 +640,59 @@ this._setupNetworkCallbacks();
 
 ```javascript
 _setupNetworkCallbacks() {
+    this.network.onWelcome = (data) => {
+        // Accepted: persist name, hide the join overlay, show chat, then
+        // regenerate the world from the shared seed via resetWorld().
+    };
+    this.network.onJoinError = (reason) => {
+        // Rejected: show inline reason on the overlay, re-enable JOIN.
+    };
+    this.network.onDisconnect = (wasJoined) => {
+        // In-world close: clear remote players, re-show the overlay.
+        // Pre-join close with a join in flight: unlock the overlay for retry.
+    };
     this.network.onPlayerJoin = (id, data) => {
-        this.remotePlayers.addPlayer(id, data);
-        this._showMultiplayerToast(`Player ${id} joined`);
+        this.remotePlayers.addPlayer(id, data);   // data.name → nametag
+        this._showMultiplayerToast(`${data.name || 'Player ' + id} joined`);
     };
-    
-    this.network.onPlayerLeave = (id) => {
+    this.network.onPlayerLeave = (id, data) => {
         this.remotePlayers.removePlayer(id);
-        this._showMultiplayerToast(`Player ${id} left`);
+        this._showMultiplayerToast(`${(data && data.name) || 'Player ' + id} left`);
     };
-    
     this.network.onPlayerUpdate = (id, data) => {
         this.remotePlayers.updatePlayer(id, data);
     };
-    
     this.network.onWorldEvent = (event) => {
         this._handleRemoteWorldEvent(event);
+    };
+    this.network.onChat = (id, text, name) => {
+        this._handleRemoteChat(id, text, name);
     };
 }
 ```
 
-### Connect/Disconnect
+### Join Flow
+
+There is no CONNECT button or manual URL input — `joinGame(name)` (wired to the `#join-overlay` in `index.html`) connects to the same-origin WebSocket URL and sends `join`:
 
 ```javascript
-async connectMultiplayer(url) {
-    if (this.network.connected) return;
-    
-    await this.network.connect(url);
-    this._showMultiplayerToast(`Connected as Player ${this.network.playerId}`);
-    
-    // Update UI
-    mpBtn.textContent = 'DISCONNECT';
-    mpBtn.classList.add('connected');
-}
+async joinGame(rawName) {
+    const name = String(rawName || '').replace(/\s+/g, ' ').trim();
+    if (!name) { this._setJoinError('Enter a name to play'); return; }
+    if (this._joining) return;
+    this._joining = true;
 
-disconnectMultiplayer() {
-    this.network.disconnect();
-    this.remotePlayers.clear();
-    
-    // Reset UI
-    mpBtn.textContent = 'CONNECT';
-    mpBtn.classList.remove('connected');
+    if (!this.network.connected) {
+        await this.network.connect(this._defaultServerUrl()); // ws:// or wss:// same-origin
+    }
+    this.network.join(name);
+    // Outcome arrives asynchronously: onWelcome (hide overlay, regen world
+    // from seed) or onJoinError (show reason, re-enable the JOIN button).
 }
 ```
+
+Overlay behavior:
+- Shown on page load and whenever an in-world connection drops; hidden on `welcome`.
+- While visible it blocks the mouse (full-screen, top z-index) and all game keybinds (`InputHandler._isChatFocused()` returns true while the overlay lacks `.hidden`).
+- Showing it releases any held movement keys (`state.inputs`) so nothing stays latched through a rejoin.
+- The accepted name is persisted in `localStorage` under `playerName` and pre-filled next visit.
