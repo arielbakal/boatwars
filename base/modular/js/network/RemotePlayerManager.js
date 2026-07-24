@@ -44,7 +44,7 @@ export default class RemotePlayerManager {
     /**
      * Build a blocky character matching the local player style
      */
-    _buildModel(id) {
+    _buildModel(id, name) {
         const colors = this._playerColors(id);
         const matBody = new THREE.MeshToonMaterial({ color: colors.body });
         const matLimb = new THREE.MeshToonMaterial({ color: colors.limb });
@@ -110,7 +110,15 @@ export default class RemotePlayerManager {
         c.fillStyle = '#ffffff';
         c.font = 'bold 28px sans-serif';
         c.textAlign = 'center';
-        c.fillText(`Player ${id}`, 128, 42);
+        const label = name || `Player ${id}`;
+        // Names are server-capped at 16 chars but a wide name can still overflow
+        // the 256px canvas — shrink the font until it fits with side padding.
+        let fontSize = 28;
+        while (c.measureText(label).width > 236 && fontSize > 14) {
+            fontSize -= 2;
+            c.font = `bold ${fontSize}px sans-serif`;
+        }
+        c.fillText(label, 128, 42);
         const tex = new THREE.CanvasTexture(canvas);
         const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true });
         const nameLabel = new THREE.Sprite(spriteMat);
@@ -133,7 +141,7 @@ export default class RemotePlayerManager {
     addPlayer(id, data) {
         if (this.players.has(id)) return;
 
-        const model = this._buildModel(id);
+        const model = this._buildModel(id, data.name);
         const pos = data.position || { x: 0, y: 0, z: 0 };
         model.group.position.set(pos.x, pos.y, pos.z);
 
@@ -141,6 +149,7 @@ export default class RemotePlayerManager {
 
         this.players.set(id, {
             ...model,
+            name: data.name || null,
             targetPos: new THREE.Vector3(pos.x, pos.y, pos.z),
             currentPos: new THREE.Vector3(pos.x, pos.y, pos.z),
             targetRot: data.rotation || 0,

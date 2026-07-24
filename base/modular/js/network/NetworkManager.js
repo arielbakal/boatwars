@@ -10,14 +10,17 @@ export default class NetworkManager {
         this.ws = null;
         this.connected = false;
         this.playerId = null;
-        this.remotePlayers = new Map();   // id → { position, rotation, state }
+        this.playerName = null;           // server-accepted name (set on welcome)
+        this.remotePlayers = new Map();   // id → { name, position, rotation, state }
         this.onPlayerJoin = null;         // callback(id, data)
-        this.onPlayerLeave = null;        // callback(id)
+        this.onPlayerLeave = null;        // callback(id, data)
         this.onPlayerUpdate = null;       // callback(id, data)
         this.onWorldEvent = null;         // callback(event)
         this.onWelcome = null;            // callback(data) - receives seed, playerCount
+        this.onJoinError = null;          // callback(reason) - join rejected by server
+        this.onDisconnect = null;         // callback(wasJoined) - socket closed
         this.onInventoryUpdate = null;    // callback(id, data)
-        this.onChat = null;               // callback(playerId, text)
+        this.onChat = null;               // callback(playerId, text, name)
         this._sendQueue = [];
         this._lastSendTime = 0;
         this.SEND_RATE = 1000 / 20;       // 20 ticks/sec
@@ -48,7 +51,11 @@ export default class NetworkManager {
                 this.ws.onclose = () => {
                     this.connected = false;
                     this.remotePlayers.clear();
+                    const wasJoined = this.playerId !== null;
+                    this.playerId = null;
+                    this.playerName = null;
                     console.log('[Network] Disconnected');
+                    if (this.onDisconnect) this.onDisconnect(wasJoined);
                 };
 
                 this.ws.onerror = (err) => {
@@ -66,6 +73,15 @@ export default class NetworkManager {
             this.ws.close();
             this.ws = null;
         }
+    }
+
+    /**
+     * Request to join the shared world. The server validates the name and
+     * replies with either `welcome` (accepted) or `join_error` (rejected —
+     * the socket stays open so the player can retry with another name).
+     */
+    join(name) {
+        this._send(MessageProtocol.encode({ type: 'join', name }));
     }
 
     /**
@@ -167,13 +183,20 @@ export default class NetworkManager {
         switch (msg.type) {
             case 'welcome':
                 this.playerId = msg.id;
+                this.playerName = msg.name || null;
                 this.worldSeed = msg.seed || null;
-                console.log('[Network] Assigned ID:', msg.id, 'Seed:', msg.seed);
+                console.log('[Network] Assigned ID:', msg.id, 'Name:', msg.name, 'Seed:', msg.seed);
                 if (this.onWelcome) this.onWelcome(msg);
+                break;
+
+            case 'join_error':
+                console.warn('[Network] Join rejected:', msg.reason);
+                if (this.onJoinError) this.onJoinError(msg.reason);
                 break;
 
             case 'player_join':
                 this.remotePlayers.set(msg.id, {
+                    name: msg.name || null,
                     position: msg.position,
                     rotation: msg.rotation
                 });
@@ -182,7 +205,7 @@ export default class NetworkManager {
 
             case 'player_leave':
                 this.remotePlayers.delete(msg.id);
-                if (this.onPlayerLeave) this.onPlayerLeave(msg.id);
+                if (this.onPlayerLeave) this.onPlayerLeave(msg.id, msg);
                 break;
 
             case 'player_state':
@@ -208,8 +231,8 @@ export default class NetworkManager {
                 break;
 
             case 'chat':
-                // Server relay shape: { type: 'chat', playerId, text } (server/index.js).
-                if (this.onChat) this.onChat(msg.playerId, msg.text);
+                // Server relay shape: { type: 'chat', playerId, name, text } (server/index.js).
+                if (this.onChat) this.onChat(msg.playerId, msg.text, msg.name);
                 break;
         }
     }

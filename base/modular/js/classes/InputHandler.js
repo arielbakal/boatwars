@@ -24,13 +24,19 @@ export default class InputHandler {
     }
 
     /**
-     * True while the player is typing in the multiplayer chat input. Gates every
-     * game keybind below (w/a/s/d/space/shift, ship pitch, inventory digits,
-     * escape, g, c, e, r) so typing "wasd" moves the cursor in the text box
-     * instead of the player in the world.
+     * True while keyboard input belongs to the UI instead of the game: typing in
+     * the multiplayer chat input or the join-name field, or whenever the join
+     * overlay is up (it blocks the mouse via z-index, but keydowns would still
+     * reach the world behind it — e.g. after clicking JOIN moves focus off the
+     * name field). Gates every game keybind below (w/a/s/d/space/shift, ship
+     * pitch, inventory digits, escape, g, c, e, r).
      */
     _isChatFocused() {
-        return !!document.activeElement && document.activeElement.id === 'mp-chat-input';
+        const overlay = document.getElementById('join-overlay');
+        if (overlay && !overlay.classList.contains('hidden')) return true;
+        if (!document.activeElement) return false;
+        const id = document.activeElement.id;
+        return id === 'mp-chat-input' || id === 'join-name';
     }
 
     setupKeyboard() {

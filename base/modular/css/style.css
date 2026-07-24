@@ -812,48 +812,6 @@ input[type=range] {
     text-align: center;
 }
 
-#mp-url {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 3px;
-    color: #fff;
-    font-family: 'Courier New', monospace;
-    font-size: 10px;
-    padding: 4px 6px;
-    outline: none;
-    width: 100%;
-}
-
-#mp-url:focus {
-    border-color: #0f0;
-}
-
-#mp-connect-btn {
-    background: rgba(0, 255, 0, 0.2);
-    border: 1px solid #0f0;
-    border-radius: 3px;
-    color: #0f0;
-    font-family: 'Press Start 2P', monospace;
-    font-size: 8px;
-    padding: 6px;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-
-#mp-connect-btn:hover {
-    background: rgba(0, 255, 0, 0.4);
-}
-
-#mp-connect-btn.connected {
-    background: rgba(255, 50, 50, 0.2);
-    border-color: #f33;
-    color: #f33;
-}
-
-#mp-connect-btn.connected:hover {
-    background: rgba(255, 50, 50, 0.4);
-}
-
 #mp-player-count {
     color: #888;
     font-size: 7px;
@@ -979,4 +937,91 @@ input[type=range] {
 @keyframes deathPulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.7; transform: scale(1.05); }
+}
+/* ===== Join Overlay (multiplayer-first entry gate) ===== */
+#join-overlay {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse at center, rgba(6, 18, 10, 0.97), rgba(0, 0, 0, 0.99));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    pointer-events: auto;
+}
+
+#join-overlay.hidden {
+    display: none;
+}
+
+#join-card {
+    background: rgba(0, 0, 0, 0.75);
+    border: 1px solid rgba(0, 255, 0, 0.3);
+    border-radius: 8px;
+    padding: 32px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    align-items: center;
+    min-width: 300px;
+}
+
+#join-title {
+    color: #0f0;
+    font-size: 18px;
+    letter-spacing: 4px;
+    text-align: center;
+    text-shadow: 0 0 12px rgba(0, 255, 0, 0.5);
+}
+
+#join-subtitle {
+    color: #aaa;
+    font-size: 8px;
+    text-align: center;
+}
+
+#join-name {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #fff;
+    font-family: 'Press Start 2P', 'Courier New', monospace;
+    font-size: 12px;
+    padding: 10px 12px;
+    outline: none;
+    width: 100%;
+    text-align: center;
+}
+
+#join-name:focus {
+    border-color: #0f0;
+}
+
+#join-btn {
+    background: rgba(0, 255, 0, 0.2);
+    border: 1px solid #0f0;
+    border-radius: 4px;
+    color: #0f0;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    padding: 10px 24px;
+    cursor: pointer;
+    transition: background 0.2s;
+    width: 100%;
+}
+
+#join-btn:hover:not(:disabled) {
+    background: rgba(0, 255, 0, 0.4);
+}
+
+#join-btn:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
+#join-error {
+    color: #f33;
+    font-size: 8px;
+    text-align: center;
+    min-height: 10px;
 }

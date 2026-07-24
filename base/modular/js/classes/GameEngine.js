@@ -124,17 +124,27 @@ export default class GameEngine {
 
     setupButtons() {
         this.ui.resetBtn.addEventListener('click', () => this.resetWorld());
-        const mpBtn = document.getElementById('mp-connect-btn');
-        const mpUrl = document.getElementById('mp-url');
-        if (mpBtn && mpUrl) {
-            mpBtn.addEventListener('click', () => {
-                if (this.network.connected) {
-                    this.disconnectMultiplayer();
-                } else {
-                    this.connectMultiplayer(mpUrl.value.trim());
-                }
-            });
-        }
+        this._setupJoinOverlay();
+    }
+
+    /**
+     * Wire the multiplayer-first join overlay: name input + JOIN button shown
+     * on load (and re-shown on disconnect). The world behind it keeps running
+     * the solo boot world; joining regenerates it from the server seed via the
+     * existing onWelcome → resetWorld() path.
+     */
+    _setupJoinOverlay() {
+        const nameInput = document.getElementById('join-name');
+        const joinBtn = document.getElementById('join-btn');
+        if (!nameInput || !joinBtn) return;
+
+        nameInput.value = localStorage.getItem('playerName') || '';
+        const submit = () => this.joinGame(nameInput.value);
+        joinBtn.addEventListener('click', submit);
+        nameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') submit();
+        });
+        nameInput.focus();
     }
 
     addToInventory(type, color, style, age = 0) {
@@ -958,11 +968,19 @@ export default class GameEngine {
 
     _setupNetworkCallbacks() {
         this.network.onWelcome = (data) => {
-            // welcome carries { id, seed } — NetworkManager assigns both to
-            // this.network.playerId/worldSeed BEFORE invoking this callback, so
-            // both are already valid to read here.
+            // welcome carries { id, name, seed } — NetworkManager assigns them to
+            // this.network.playerId/playerName/worldSeed BEFORE invoking this
+            // callback, so all are already valid to read here.
+            this._joining = false;
+            localStorage.setItem('playerName', this.network.playerName || '');
+            this._setJoinOverlayVisible(false);
             const status = document.getElementById('mp-status');
-            if (status) status.textContent = `Player #${data.id}`;
+            if (status) status.textContent = this.network.playerName || `Player #${data.id}`;
+            if (this.ui.mpChat) this.ui.mpChat.style.display = 'flex';
+            // Each welcome starts a fresh session — drop chat lines carried over
+            // from a previous connection.
+            if (this.ui.mpChatLog) this.ui.mpChatLog.innerHTML = '';
+            this._updatePlayerCount(data.playerCount);
             this._showMultiplayerToast('Joined shared world');
             // Regenerate using the EXACT same path the "Reset World" button already
             // uses while connected: resetWorld() tears down the current world, then
@@ -974,13 +992,53 @@ export default class GameEngine {
             // mid-boarding-walk or mid-death-screen still ends in a consistent state.
             this.resetWorld();
         };
+        this.network.onJoinError = (reason) => {
+            this._joining = false;
+            const joinBtn = document.getElementById('join-btn');
+            if (joinBtn) joinBtn.disabled = false;
+            this._setJoinError(reason === 'name_taken'
+                ? 'That name is taken — pick another'
+                : 'Invalid name — try another');
+            // Put the caret back in the name field: clicking JOIN moved focus to
+            // the button, and unfocused keystrokes would otherwise be eaten by
+            // the overlay's keyboard gate instead of editing the name.
+            const nameInput = document.getElementById('join-name');
+            if (nameInput) nameInput.focus();
+        };
+        this.network.onDisconnect = (wasJoined) => {
+            // Fires on ANY socket close.
+            const joinWasInFlight = this._joining;
+            this._joining = false;
+            if (!wasJoined) {
+                // Pre-join close. connect() rejections are handled by joinGame's
+                // catch, but a socket that dies AFTER `join` was sent and BEFORE
+                // welcome/join_error lands would otherwise leave the overlay
+                // soft-locked (button disabled, _joining stuck) — unlock it.
+                if (joinWasInFlight) {
+                    this._setJoinOverlayVisible(true);
+                    this._setJoinError('Connection lost — try again');
+                }
+                return;
+            }
+            this.remotePlayers.clear();
+            const status = document.getElementById('mp-status');
+            if (status) status.textContent = 'Offline';
+            this._updatePlayerCount(null);
+            if (this.ui.mpChat) this.ui.mpChat.style.display = 'none';
+            if (this.ui.mpChatInput) this.ui.mpChatInput.blur();
+            this._showMultiplayerToast('Disconnected');
+            this._setJoinOverlayVisible(true);
+            this._setJoinError('Connection lost — join again');
+        };
         this.network.onPlayerJoin = (id, data) => {
             this.remotePlayers.addPlayer(id, data);
-            this._showMultiplayerToast(`Player ${id} joined`);
+            this._updatePlayerCount();
+            this._showMultiplayerToast(`${data.name || 'Player ' + id} joined`);
         };
-        this.network.onPlayerLeave = (id) => {
+        this.network.onPlayerLeave = (id, data) => {
             this.remotePlayers.removePlayer(id);
-            this._showMultiplayerToast(`Player ${id} left`);
+            this._updatePlayerCount();
+            this._showMultiplayerToast(`${(data && data.name) || 'Player ' + id} left`);
         };
         this.network.onPlayerUpdate = (id, data) => {
             this.remotePlayers.updatePlayer(id, data);
@@ -991,44 +1049,90 @@ export default class GameEngine {
         this.network.onInventoryUpdate = (id, data) => {
             this.remotePlayers.updateInventory(id, data);
         };
-        this.network.onChat = (id, text) => {
-            this._handleRemoteChat(id, text);
+        this.network.onChat = (id, text, name) => {
+            this._handleRemoteChat(id, text, name);
         };
     }
 
-    async connectMultiplayer(url) {
-        if (this.network.connected) return;
+    /**
+     * Join the shared world with the given display name. Connects to the
+     * same-origin WebSocket server if needed, then sends `join {name}`. The
+     * outcome arrives asynchronously: `welcome` (accepted — onWelcome hides
+     * the overlay and regenerates the world) or `join_error` (rejected —
+     * onJoinError shows the reason and re-enables the button).
+     */
+    async joinGame(rawName) {
+        const name = String(rawName || '').replace(/\s+/g, ' ').trim();
+        if (!name) {
+            this._setJoinError('Enter a name to play');
+            return;
+        }
+        if (this._joining) return;
+        this._joining = true;
+        this._setJoinError('');
+        const joinBtn = document.getElementById('join-btn');
+        if (joinBtn) joinBtn.disabled = true;
+
         try {
-            await this.network.connect(url);
+            if (!this.network.connected) {
+                await this.network.connect(this._defaultServerUrl());
+            }
             // network.connect() resolves on the WebSocket's onopen, which fires
-            // BEFORE the server's 'welcome' message (id + seed) arrives over
-            // onmessage — reading this.network.playerId here was always null.
-            // The player-id status label and the world regen both happen in
-            // onWelcome (_setupNetworkCallbacks) once the real id/seed land.
-            const btn = document.getElementById('mp-connect-btn');
-            if (btn) { btn.textContent = 'DISCONNECT'; btn.classList.add('connected'); }
-            if (this.ui.mpChat) this.ui.mpChat.style.display = 'flex';
+            // BEFORE any server reply — the join outcome lands later through
+            // onWelcome / onJoinError (_setupNetworkCallbacks).
+            this.network.join(name);
         } catch (err) {
             console.error('[Multiplayer] Connection failed:', err);
-            this._showMultiplayerToast('Connection failed!');
+            this._joining = false;
+            if (joinBtn) joinBtn.disabled = false;
+            this._setJoinError('Cannot reach server — try again');
         }
     }
 
-    disconnectMultiplayer() {
-        this.network.disconnect();
-        this.remotePlayers.clear();
-        const btn = document.getElementById('mp-connect-btn');
-        if (btn) { btn.textContent = 'CONNECT'; btn.classList.remove('connected'); }
-        const status = document.getElementById('mp-status');
-        if (status) status.textContent = 'Offline';
-        this._showMultiplayerToast('Disconnected');
-        if (this.ui.mpChat) this.ui.mpChat.style.display = 'none';
-        if (this.ui.mpChatInput) this.ui.mpChatInput.blur();
+    /** Same-origin WebSocket URL (ws:// or wss:// following the page protocol). */
+    _defaultServerUrl() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const path = window.location.pathname === '/' ? '' : window.location.pathname;
+        return `${protocol}//${window.location.host}${path}`;
+    }
+
+    _setJoinOverlayVisible(visible) {
+        const overlay = document.getElementById('join-overlay');
+        if (!overlay) return;
+        overlay.classList.toggle('hidden', !visible);
+        if (visible) {
+            // While the overlay is up, InputHandler swallows keyups as well as
+            // keydowns — a key held right now would stay latched through the
+            // next join (resetWorld never touches state.inputs). Release all.
+            for (const k of Object.keys(this.state.inputs)) this.state.inputs[k] = false;
+            const joinBtn = document.getElementById('join-btn');
+            if (joinBtn) joinBtn.disabled = false;
+            const nameInput = document.getElementById('join-name');
+            if (nameInput) nameInput.focus();
+        }
+    }
+
+    _setJoinError(text) {
+        const el = document.getElementById('join-error');
+        if (el) el.textContent = text;
+    }
+
+    /**
+     * Refresh the "N online" counter. Pass an explicit count (e.g. welcome's
+     * playerCount) or omit it to derive from the remote roster + self. Pass
+     * null to clear (offline).
+     */
+    _updatePlayerCount(count) {
+        const el = document.getElementById('mp-player-count');
+        if (!el) return;
+        if (count === null) { el.textContent = ''; return; }
+        const n = count !== undefined ? count : this.network.remotePlayers.size + 1;
+        el.textContent = `${n} online`;
     }
 
     /**
      * Wire the multiplayer chat log + input (near #mp-panel). Only visible while
-     * network.connected (toggled in connectMultiplayer/disconnectMultiplayer above).
+     * network.connected (toggled in onWelcome/onDisconnect above).
      *
      * Scheme: Enter opens the input (when connected, not already typing, and no
      * other text field/dialog has focus) or click it directly; Enter inside it
@@ -1051,10 +1155,10 @@ export default class GameEngine {
         this.ui.mpChatInput = input;
 
         const MAX_LOG_LINES = 8;
-        this._appendChatLine = (id, text) => {
+        this._appendChatLine = (displayName, text) => {
             const line = document.createElement('div');
             line.className = 'mp-chat-line';
-            line.textContent = `Player ${id}: ${text}`;
+            line.textContent = `${displayName}: ${text}`;
             log.appendChild(line);
             while (log.children.length > MAX_LOG_LINES) log.removeChild(log.firstChild);
             log.scrollTop = log.scrollHeight;
@@ -1087,8 +1191,8 @@ export default class GameEngine {
             if (dialog && dialog.style.display === 'flex') return;
             const active = document.activeElement;
             // Already focused here (this keydown will be handled by the listener
-            // above instead) or focused on some other text field (mp-url, the NPC
-            // chat input, etc.) — don't steal focus in either case.
+            // above instead) or focused on some other text field (join-name, the
+            // NPC chat input, etc.) — don't steal focus in either case.
             if (active && (active === input || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
             input.focus();
         });
@@ -1100,10 +1204,10 @@ export default class GameEngine {
      * of truth for both remote and our own echoed messages; sendChat() never
      * appends optimistically).
      */
-    _handleRemoteChat(id, text) {
+    _handleRemoteChat(id, text, name) {
         if (!text) return;
         const safeText = String(text).slice(0, 200);
-        if (this._appendChatLine) this._appendChatLine(id, safeText);
+        if (this._appendChatLine) this._appendChatLine(name || `Player ${id}`, safeText);
         if (id !== this.network.playerId) {
             this.remotePlayers.showChatBubble(id, safeText);
         }

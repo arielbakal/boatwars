@@ -80,17 +80,6 @@
         <div id="mp-panel">
             <div id="mp-header">MULTIPLAYER</div>
             <div id="mp-status">Offline</div>
-            <input type="text" id="mp-url" placeholder="ws://host:port">
-            <script>
-                // Auto-fill the WebSocket URL based on current page URL
-                (function () {
-                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    const host = window.location.host;
-                    const path = window.location.pathname === '/' ? '' : window.location.pathname;
-                    document.getElementById('mp-url').value = `${protocol}//${host}${path}`;
-                })();
-            </script>
-            <button id="mp-connect-btn">CONNECT</button>
             <div id="mp-player-count"></div>
             <!-- Player chat: hidden until connected (toggled by GameEngine). Enter
                  opens it (or click it directly); Enter inside sends and closes;
@@ -113,6 +102,18 @@
                 <input type="text" id="chat-input" placeholder="Ask something...">
                 <button id="chat-send-btn">Send</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Join Overlay: multiplayer-first entry gate. Shown on load; hidden once
+         the server accepts the name and sends `welcome`. Re-shown on disconnect. -->
+    <div id="join-overlay">
+        <div id="join-card">
+            <div id="join-title">ISLAND SURVIVAL</div>
+            <div id="join-subtitle">Enter your name to join the world</div>
+            <input type="text" id="join-name" placeholder="Your name" maxlength="16" autocomplete="off" spellcheck="false">
+            <button id="join-btn">JOIN</button>
+            <div id="join-error"></div>
         </div>
     </div>
 

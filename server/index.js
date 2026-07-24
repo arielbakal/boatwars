@@ -52,51 +52,98 @@ const httpServer = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server: httpServer });
 
 let nextPlayerId = 1;
-const players = new Map(); // ws → { id, position, rotation }
+const players = new Map(); // ws → { id, name, position, rotation }
+
+const MAX_NAME_LENGTH = 16;
+const JOIN_TIMEOUT_MS = 30000;
 
 // Shared world seed — all players get the same seed so worlds match
 let worldSeed = Math.floor(Math.random() * 0xFFFFFF);
 console.log(`[Server] World seed: 0x${worldSeed.toString(16)}`);
 
 wss.on('connection', (ws) => {
-    const playerId = nextPlayerId++;
-    const playerData = {
-        id: playerId,
-        position: { x: 0, y: 0, z: 0 },
-        rotation: 0
-    };
-    players.set(ws, playerData);
+    // Server-authoritative join: a connection stays "pending" until it sends a
+    // valid `join {name}`. Pending sockets are not in the players map, receive
+    // no welcome and no broadcasts, and are dropped after JOIN_TIMEOUT_MS.
+    let playerData = null;
 
-    // Send welcome with assigned ID and world seed
-    ws.send(JSON.stringify({ type: 'welcome', id: playerId, seed: worldSeed, playerCount: players.size }));
+    const joinTimeout = setTimeout(() => {
+        if (!playerData) ws.close();
+    }, JOIN_TIMEOUT_MS);
 
-    // Notify existing players about new player
-    broadcast(ws, JSON.stringify({
-        type: 'player_join',
-        id: playerId,
-        position: playerData.position,
-        rotation: playerData.rotation
-    }));
-
-    // Send existing players to the new player
-    for (const [otherWs, otherData] of players) {
-        if (otherWs !== ws && otherWs.readyState === 1) {
-            ws.send(JSON.stringify({
-                type: 'player_join',
-                id: otherData.id,
-                position: otherData.position,
-                rotation: otherData.rotation,
-                inventory: otherData.inventory || null,
-                selectedSlot: otherData.selectedSlot ?? null
-            }));
+    function handleJoin(msg) {
+        const name = String(msg.name ?? '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, MAX_NAME_LENGTH);
+        if (!name) {
+            ws.send(JSON.stringify({ type: 'join_error', reason: 'invalid_name' }));
+            return;
         }
-    }
+        const taken = [...players.values()].some(
+            p => p.name.toLowerCase() === name.toLowerCase()
+        );
+        if (taken) {
+            ws.send(JSON.stringify({ type: 'join_error', reason: 'name_taken' }));
+            return;
+        }
 
-    console.log(`[Server] Player ${playerId} connected (${players.size} total)`);
+        clearTimeout(joinTimeout);
+        playerData = {
+            id: nextPlayerId++,
+            name,
+            position: { x: 0, y: 0, z: 0 },
+            rotation: 0
+        };
+        players.set(ws, playerData);
+
+        // Send welcome with assigned ID, accepted name and world seed
+        ws.send(JSON.stringify({
+            type: 'welcome',
+            id: playerData.id,
+            name,
+            seed: worldSeed,
+            playerCount: players.size
+        }));
+
+        // Notify existing players about new player
+        broadcast(ws, JSON.stringify({
+            type: 'player_join',
+            id: playerData.id,
+            name,
+            position: playerData.position,
+            rotation: playerData.rotation
+        }));
+
+        // Send existing players to the new player
+        for (const [otherWs, otherData] of players) {
+            if (otherWs !== ws && otherWs.readyState === 1) {
+                ws.send(JSON.stringify({
+                    type: 'player_join',
+                    id: otherData.id,
+                    name: otherData.name,
+                    position: otherData.position,
+                    rotation: otherData.rotation,
+                    inventory: otherData.inventory || null,
+                    selectedSlot: otherData.selectedSlot ?? null
+                }));
+            }
+        }
+
+        console.log(`[Server] ${name} (#${playerData.id}) joined (${players.size} total)`);
+    }
 
     ws.on('message', (raw) => {
         try {
             const msg = JSON.parse(raw);
+
+            // Until joined, the ONLY accepted message is `join`
+            if (!playerData) {
+                if (msg.type === 'join') handleJoin(msg);
+                return;
+            }
+
+            const playerId = playerData.id;
             switch (msg.type) {
                 case 'player_state':
                     playerData.position = msg.position;
@@ -147,22 +194,26 @@ wss.on('connection', (ws) => {
                     broadcast(null, JSON.stringify({
                         type: 'chat',
                         playerId,
+                        name: playerData.name,
                         text: msg.text
                     }));
                     break;
             }
         } catch (e) {
-            console.warn('[Server] Bad message from player', playerId);
+            console.warn('[Server] Bad message from player', playerData ? playerData.id : '(pending)');
         }
     });
 
     ws.on('close', () => {
+        clearTimeout(joinTimeout);
+        if (!playerData) return; // pending socket never joined — nothing to announce
         players.delete(ws);
         broadcast(null, JSON.stringify({
             type: 'player_leave',
-            id: playerId
+            id: playerData.id,
+            name: playerData.name
         }));
-        console.log(`[Server] Player ${playerId} disconnected (${players.size} total)`);
+        console.log(`[Server] ${playerData.name} (#${playerData.id}) disconnected (${players.size} total)`);
     });
 });
 
