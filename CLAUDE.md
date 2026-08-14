@@ -19,14 +19,15 @@ No test runner or linter is configured.
 ## Architecture
 
 ### Entry Flow
-`base/modular/index.html` → `js/main.js` → `new GameEngine()` → `initGame()` → `animate()` loop
+`base/modular/index.html` → `js/main.js` → `installCorePatches()` → `new GameEngine()` → `installEnginePatches(game)` → `initGame()` → `animate()` loop
 
 ### Key Directories
 - `server/index.js` — Node.js HTTP + WebSocket server (no rooms, no auth)
 - `base/modular/` — All client code (served as static files)
 - `base/modular/js/classes/` — Core engine classes
-- `base/modular/js/systems/` — Game systems (chop, mine, boat, AI, particles, inventory, combat)
+- `base/modular/js/systems/` — Game systems (chop, mine, boat, AI, particles, inventory, combat, breach)
 - `base/modular/js/network/` — Multiplayer client (WebSocket, seeded RNG, message protocol)
+- `base/modular/js/patches/` — Visual/gameplay layers that rewrite prototypes at load time
 
 ### Game Loop (`GameEngine.animate()`)
 Each frame builds a `context` object (state, world, audio, factory, camera, playerController, etc.) and calls each system's `update(dt, context)` directly. `SystemManager` exists but systems are invoked manually in sequence.
@@ -43,6 +44,17 @@ JSON over WebSocket. Message types: `welcome`, `player_join`, `player_leave`, `p
 ### Combat System
 `CombatSystem.js` handles melee attacks (cooldown-based, forward arc), creature aggro/contact damage, stat boosts (speed/attack/health essences dropped by creatures), death/respawn with invincibility timer, and HP bar UI. Combat constants are in `constants.js`. Three creature types drop typed essences: `conehead` → speed, `blobby` → attack, `blocky` → health.
 
+### Breach System
+`BreachSystem.js` is the projectile-combat pillar: a ranged weapon with aim/recoil, per-planet blight enemy counts and a world stability meter, world hearts, ragdolls and dew drops. `GameEngine` constructs it, calls `initialize(state.islands, ctx)` from `initGame`, passes it in the frame context, and calls `cleanup()` on reset. HUD lives in `#breach-hud`. It takes damage through `CombatSystem.damagePlayerFromBreach`.
+
+### Player Rig
+`ProceduralRig.js` exports `SegmentMesh` (used by `EntityFactory`) and the `ProceduralRig` class that solves the player's procedural IK. Because a patch layer swaps the rig for a subclass, consumers resolve it through `getProceduralRig()` / `setProceduralRig()` rather than importing the class directly.
+
+### Patch Layers (`js/patches/`)
+Each layer is an `install*(engine?)` function that rewrites prototypes on `EntityFactory`, `WorldManager`, `CatAI`, `CombatSystem`, `BoatSystem` and `InputHandler`. `patches/index.js` fixes the order: `installCorePatches()` runs the two prototype-level layers before the engine exists (world generation reads the material and factory paths they replace), then `installEnginePatches(game)` runs the engine-level layers.
+
+Five layers are ported but dormant — they never executed in the single-file prototype because they were handed a `null` engine. `patches/flags.js` gates them, all `false` by default. See `ROADMAP.md`.
+
 ### State Management
 `GameState` holds all mutable state (including combat: `hp`, `maxHp`, `attack`, `speedBoost`, `stunTimer`) and provides `reset()`. Passed by reference into every system via the context object.
 
@@ -56,3 +68,5 @@ JSON over WebSocket. Message types: `welcome`, `player_join`, `player_leave`, `p
 - `LLMService.js` has a syntax error (`dsa` on line 20) and returns random fallbacks (LLM integration is disabled)
 - `ecs/systems/` directory is empty — ECS migration was started but not completed
 - Must be served over HTTP, not `file://`, due to ES6 module requirements
+- The patch layers and `BreachSystem` call `Math.random()` directly, so they are outside the `SeededRandom` world-generation contract — clients will not agree on the dressing they produce
+- `BreachSystem` state (enemy HP, kills, stability, world hearts) is not in the network protocol; each client fights its own enemies

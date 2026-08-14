@@ -63,3 +63,102 @@ Ordered so each step is shippable on its own:
 - **Client-files-only preference:** the dev server stays live during playtests; avoid `server/index.js` changes (a restart rerolls the shared seed).
 - **Keep it stylized, not realistic.** Cheap tricks (palette, density, particles, shells) over new tech. If a feature isn't easy, it stays an idea — explicitly requested by the user.
 - **Findability:** chief/tools/golem stay near spawn poles (`rndSurface`); only dressing scatters planet-wide.
+
+---
+
+# Fracture Biosphere v11 Port
+
+Stage 1 of porting `terrarium-breach-fracture-biosphere-v11.html` into the
+modular tree. **Status: DONE (pure port).** Behaviour reproduces the prototype;
+no determinism or networking work was attempted, by design, so any bug found
+here is provably pre-existing.
+
+## What landed
+
+- New modules: `js/systems/BreachSystem.js`, `js/classes/ProceduralRig.js`.
+- 12 modified modules; `RENDER_SCALE` 0.5 → 0.92.
+- `js/patches/` — the prototype's 8 install layers, plus `flags.js` and `index.js`.
+- `index.html` gained the breach/intro/grade markup; `css/style.css` absorbed the
+  prototype's three style blocks.
+
+## Dormant patch layers
+
+Five layers never ran in the prototype. Its `const game` lived inside an IIFE, so
+the later script blocks resolved `typeof game !== 'undefined' ? game : null` to
+`null` and every layer returned at its own `if (!engine) return;` guard. Verified
+by probing the original file: only `[Terrarium Quality V8]` and
+`[Artistic Unlit V4]` ever log.
+
+Gated `false` in `js/patches/flags.js`:
+
+| Flag | Layer | What it should add |
+|---|---|---|
+| `screenFeelV7` | `screen-feel-v7.js` | drives the kinetic CSS custom properties |
+| `qualityRuntimeV8` | `quality-runtime-v8.js` | procedural hull panels, ship upgrade dressing |
+| `biosphereFaunaV9` | `biosphere-fauna-v9.js` | legged creatures, extra flora, sphere-wide scatter |
+| `fractureBiosphereV10` | `fracture-biosphere-v10.js` | recursive organisms, fractal sky, GPU field pass |
+| `fractureBiosphereV11` | `fracture-biosphere-v11.js` | silhouettes, planet atmospherics, nebular canopy |
+
+Note the v10/v11 **stylesheets** were always live, which is why those versions
+looked different despite their JS never running. Flipping a flag runs code that
+has never executed once — expect breakage, and do them one at a time.
+
+## Deviations from the pure port
+
+Stage 1 was meant to reproduce v11 exactly. Two changes go beyond that, both
+requested during playtesting, so the "any bug here is provably pre-existing"
+claim no longer holds for these areas:
+
+1. **Intro screen removed.** `#solar-intro` and its handler are gone; pointer lock
+   is acquired by clicking the canvas, which `InputHandler` already did.
+2. **Locomotion rewritten** (see below), which also changed `PLAYER_SPEED`.
+
+The webfont `@import` for Press Start 2P was also restored — v11 dropped it while
+still naming the family in ~10 rules, so it silently fell back to Courier.
+
+## Locomotion rewrite
+
+The ported rig stretched the player's legs 2-4x their length while walking. The
+cause was threefold: the shin was drawn to the raw foot position with no reach
+constraint, the stride constants were authored for a far slower character, and
+`player.vel` (a per-frame value that under-reports real motion by ~2x) was being
+used as a velocity. Incremental fixes did not converge, so `ProceduralRig` now
+models the gait properly:
+
+- **Phase clock, not triggers.** One `strideClock`; each leg reads it half a cycle
+  apart, stance/swing split by a duty factor. Symmetry is structural, so the
+  degenerate states a trigger-based stepper falls into (a leg stranded mid-air, one
+  leg locked while the body slides) cannot occur.
+- **Froude scaling.** `v^2/(g*legLength)` drives step length, cadence and the
+  walk-to-run duty change, so gait changes with speed instead of being tiered.
+- **Springs** for pelvis height, lean, bank and sway — an exponential lerp has no
+  velocity, so it cannot lag and settle.
+- **Body dynamics:** centre-of-mass bob, sway over the support leg, pelvis yaw and
+  roll applied through the hip axis, torso counter-rotation, gaze stabilisation,
+  lean into acceleration and bank into turns.
+- **Terrain adaptation:** swing targets re-sampled onto the surface every frame and
+  clamped against rises; pelvis rides the support foot, not the average.
+
+The patch layer's `_updateFeet` / `_updateBody` overrides were deleted, since they
+shadowed all of the above with the older stepper.
+
+**`PLAYER_SPEED` 0.12 -> 0.06, and `GameState` now reads it** (it previously
+hardcoded its own 0.12, leaving the constant unused). At 0.12 the character crossed
+3-5 body lengths per second against legs 0.87 long; the maximum stride the legs can
+cover is about 4.2 u/s, so even walking outran them and no gait could avoid sliding.
+This halves movement speed and is the one change here with real gameplay impact.
+
+## Stage 2 backlog
+
+1. **Determinism.** The patch layers call `Math.random()` ~87 times and
+   `BreachSystem` 11 times, outside the `SeededRandom` contract. Clients will not
+   agree on dressing. Route generation randomness through the seeded PRNG.
+2. **Breach replication.** Enemy HP, kills, stability and world hearts are absent
+   from `MessageProtocol`; each client fights private enemies. Decide what
+   replicates (this generalizes the pending essence-replication question above).
+3. **Fold the layers in.** Move each prototype override into the module it
+   patches and collapse the double `WorldManager.getMat` override (v7 then v8
+   both replace it; only v8's survives). Then `js/patches/` can go away.
+4. **Rig registry.** `getProceduralRig()`/`setProceduralRig()` exists only because
+   the prototype reassigned a class binding. Once the quality layer is folded into
+   `ProceduralRig.js`, delete the registry.
