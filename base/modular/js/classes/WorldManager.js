@@ -7,17 +7,22 @@ import { STAR_COUNT, STAR_SPREAD, SPACE_FOG_COLOR } from '../constants.js';
 export default class WorldManager {
     constructor(renderScale) {
         this.renderScale = renderScale;
+        this.pixelation = 8;
+        this._pixelMinScale = 0.58;
+        this._effectiveScale = renderScale;
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000);
+        this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.08, 2000);
         this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+        this.renderer.setPixelRatio(1);
         this.renderer.setSize(window.innerWidth * renderScale, window.innerHeight * renderScale, false);
         this.renderer.domElement.style.imageRendering = 'pixelated';
-        // r128 API — filmic tone mapping + sRGB output for correct color response
-        // against the hand-rolled HSL palettes (shifts global brightness/saturation
-        // slightly; acceptable). NOTE: r152+ renames `outputEncoding` (THREE.sRGBEncoding)
-        // to `outputColorSpace` (THREE.SRGBColorSpace) — update both lines together
-        // on any future Three.js upgrade past r151.
-        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        // The world now uses artist-directed unlit shaders. Shadows remain enabled
+        // only for the few metallic/special-effect meshes that still opt into them.
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.physicallyCorrectLights = false;
+        this.renderer.toneMapping = THREE.NoToneMapping;
+        this.renderer.toneMappingExposure = 1.0;
         this.renderer.outputEncoding = THREE.sRGBEncoding;
         document.body.appendChild(this.renderer.domElement);
         // Matches SPACE_FOG_COLOR below (the comment on scene.fog already claimed
@@ -36,26 +41,54 @@ export default class WorldManager {
         this.scene.fog = new THREE.Fog(SPACE_FOG_COLOR, 150, 700);
         this.setupLighting();
         this.createStarfield();
+        this.applyPixelation(this.pixelation);
+    }
+
+    applyPixelation(amount = 0) {
+        const clamped = Math.max(0, Math.min(100, amount || 0));
+        this.pixelation = clamped;
+        const lerp = clamped / 100;
+        this._effectiveScale = this.renderScale * (1 - lerp * (1 - this._pixelMinScale));
+        this.renderer.setPixelRatio(1);
+        this.renderer.setSize(window.innerWidth * this._effectiveScale, window.innerHeight * this._effectiveScale, false);
+        const pixelStyle = clamped > 0 ? 'pixelated' : 'auto';
+        this.renderer.domElement.style.imageRendering = pixelStyle;
+        this.renderer.domElement.style.setProperty('image-rendering', pixelStyle);
     }
 
     setupLighting() {
-        // Ambient - dimmer for space. Instance fields (plus their base
-        // intensities) so GameEngine.animate can scale surface lighting by
-        // the local planet's eco.lightLevel each frame.
-        this.ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-        this.ambientBaseIntensity = 0.4;
+        // Special meshes (ship glass, crystals, tools) still receive a soft,
+        // deliberately colored stage light. Terrain, flora and fauna use the
+        // custom unlit shader in getMat() and never depend on these lights.
+        this.ambientLight = new THREE.HemisphereLight(0xb9d8ff, 0x2b183d, 0.48);
+        this.ambientBaseIntensity = 0.48;
         this.scene.add(this.ambientLight);
 
-        // Distant sun (directional)
-        this.sunLight = new THREE.DirectionalLight(0xffffee, 1.0);
-        this.sunBaseIntensity = 1.0;
-        this.sunLight.position.set(200, 100, 50);
+        this.sunTarget = new THREE.Object3D();
+        this.scene.add(this.sunTarget);
+        this.sunLight = new THREE.DirectionalLight(0xffd8a6, 1.25);
+        this.sunBaseIntensity = 1.25;
+        this.sunLight.target = this.sunTarget;
+        this.sunLight.position.set(0, 120, 0);
+        this.sunLight.castShadow = true;
+        this.sunLight.shadow.mapSize.set(1024, 1024);
+        this.sunLight.shadow.camera.near = 0.5;
+        this.sunLight.shadow.camera.far = 260;
+        this.sunLight.shadow.camera.left = -26;
+        this.sunLight.shadow.camera.right = 26;
+        this.sunLight.shadow.camera.top = 26;
+        this.sunLight.shadow.camera.bottom = -26;
+        this.sunLight.shadow.bias = -0.0002;
+        this.sunLight.shadow.normalBias = 0.025;
         this.scene.add(this.sunLight);
 
-        // Secondary fill light from opposite side
-        const fillLight = new THREE.DirectionalLight(0x4466aa, 0.3);
-        fillLight.position.set(-100, -50, -80);
-        this.scene.add(fillLight);
+        const violetFill = new THREE.DirectionalLight(0x8d7dff, 0.38);
+        violetFill.position.set(-90, -35, -75);
+        this.scene.add(violetFill);
+
+        const cyanFill = new THREE.DirectionalLight(0x68e5ff, 0.24);
+        cyanFill.position.set(70, 30, 90);
+        this.scene.add(cyanFill);
     }
 
     createStarfield() {
@@ -109,21 +142,102 @@ export default class WorldManager {
         this.scene.add(this.stars);
     }
 
+
+    updateLocalSun(anchor) {
+        if (!anchor || !this.sunLight || !this.sunTarget) return;
+        const target = anchor instanceof THREE.Vector3 ? anchor : anchor.position;
+        if (!target) return;
+        const towardSun = target.clone().multiplyScalar(-1);
+        if (towardSun.lengthSq() < 0.0001) towardSun.set(0, 1, 0);
+        else towardSun.normalize();
+        this.sunTarget.position.copy(target);
+        this.sunLight.position.copy(target).addScaledVector(towardSun, 135);
+        this.sunTarget.updateMatrixWorld();
+        this.sunLight.updateMatrixWorld();
+    }
+
     add(obj) { this.scene.add(obj); }
     remove(obj) { this.scene.remove(obj); }
-    render() { this.renderer.render(this.scene, this.camera); }
+    render() {
+        if (this.stars) {
+            const now = performance.now() * 0.001;
+            this.stars.rotation.y = now * 0.0025;
+            this.stars.material.opacity = 0.72 + Math.sin(now * 0.55) * 0.08;
+        }
+        this.renderer.render(this.scene, this.camera);
+    }
 
     resize() {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
-        this.renderer.setSize(window.innerWidth * this.renderScale, window.innerHeight * this.renderScale, false);
+        this.applyPixelation(this.pixelation);
     }
 
     getMat(color, flat = true) {
-        // r128's MeshToonMaterial has no flatShading property — passing it was
-        // always a silent no-op (logs a console warning on every material
-        // creation). `flat` is kept as a parameter for call-site compatibility
-        // but intentionally unused now.
-        return new THREE.MeshToonMaterial({ color: color });
+        // Artist-directed unlit material: it ignores every THREE light and instead
+        // uses two fixed color ramps plus a subtle rim. This keeps the world bright,
+        // readable and consistent while still allowing terrain bumps and silhouettes
+        // to carry an intentional painted-light look.
+        const base = color instanceof THREE.Color ? color.clone() : new THREE.Color(color);
+        const shadow = base.clone().multiplyScalar(0.48).lerp(new THREE.Color(0x15162c), 0.34);
+        const accent = base.clone().offsetHSL(0.08, 0.08, 0.18);
+        const uniforms = THREE.UniformsUtils.merge([
+            THREE.UniformsLib.fog,
+            {
+                uColor: { value: base },
+                uShadow: { value: shadow },
+                uAccent: { value: accent }
+            }
+        ]);
+        const material = new THREE.ShaderMaterial({
+            uniforms,
+            fog: true,
+            flatShading: !!flat,
+            vertexShader: `
+                #include <fog_pars_vertex>
+                varying vec3 vWorldNormal;
+                varying vec3 vViewDir;
+                void main() {
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    vWorldNormal = normalize(mat3(modelMatrix) * normal);
+                    vViewDir = normalize(cameraPosition - worldPosition.xyz);
+                    vec4 mvPosition = viewMatrix * worldPosition;
+                    gl_Position = projectionMatrix * mvPosition;
+                    #include <fog_vertex>
+                }
+            `,
+            fragmentShader: `
+                #include <fog_pars_fragment>
+                uniform vec3 uColor;
+                uniform vec3 uShadow;
+                uniform vec3 uAccent;
+                varying vec3 vWorldNormal;
+                varying vec3 vViewDir;
+                void main() {
+                    vec3 n = normalize(vWorldNormal);
+                    vec3 warmDir = normalize(vec3(-0.34, 0.88, 0.33));
+                    vec3 coolDir = normalize(vec3(0.58, 0.22, -0.78));
+                    float warm = clamp(dot(n, warmDir) * 0.5 + 0.5, 0.0, 1.0);
+                    float cool = max(dot(n, coolDir), 0.0);
+                    float band = floor(warm * 5.0) / 4.0;
+                    float level = 0.18 + band * 0.72;
+                    vec3 painted = mix(uShadow, uColor, level);
+                    painted = mix(painted, uAccent, pow(cool, 2.4) * 0.08);
+                    float rim = pow(1.0 - max(dot(n, normalize(vViewDir)), 0.0), 2.8);
+                    painted += uAccent * rim * 0.045;
+                    gl_FragColor = vec4(painted, 1.0);
+                    #include <fog_fragment>
+                }
+            `
+        });
+        // Keep the same public surface as THREE's built-in materials. Several
+        // inventory and pickup paths read or mutate material.color directly;
+        // aliasing it to the shader uniform makes those operations update the
+        // rendered color instead of failing on the custom unlit material.
+        material.color = material.uniforms.uColor.value;
+        material.userData.baseShadow = material.uniforms.uShadow.value;
+        material.userData.baseAccent = material.uniforms.uAccent.value;
+        return material;
     }
 }
+

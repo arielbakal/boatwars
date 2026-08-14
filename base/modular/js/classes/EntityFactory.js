@@ -3,10 +3,11 @@
 // =====================================================
 
 import {
-    BOAT_BASE_HEALTH, BOAT_BASE_MAX_SPEED, BOAT_BASE_ACCELERATION,
-    BOAT_BASE_TURN_SPEED, BOAT_BASE_DRAG, BOAT_BASE_BRAKE
+    BOAT_BASE_HEALTH, BOAT_BASE_MAX_SPEED, BOAT_BASE_ACCELERATION, BOAT_BASE_TURN_SPEED,
+    BOAT_BASE_DRAG, BOAT_BASE_BRAKE
 } from '../constants.js';
 import SphericalUtils from './SphericalUtils.js';
+import { SegmentMesh } from './ProceduralRig.js';
 
 export default class EntityFactory {
     constructor(world, state) {
@@ -28,36 +29,54 @@ export default class EntityFactory {
      * lightLevel scales terrain/flora lightness (outer worlds read darker).
      */
     generatePalette(sphereColor, eco = null) {
+        // More disciplined art-direction: each family anchors the whole world on a
+        // restrained base hue, then introduces only one controlled contrast note.
+        const themes = [
+            { h: 0.31, flora: 0.03, soil: -0.02, accent: 0.97, creature: 0.08, water: 0.56, sat: 0.52, mood: 0.00 }, // moss, stone, terracotta
+            { h: 0.55, flora: -0.05, soil: 0.04, accent: 0.11, creature: 0.12, water: 0.58, sat: 0.48, mood: -0.02 }, // teal slate, warm ochre
+            { h: 0.67, flora: -0.12, soil: -0.03, accent: 0.39, creature: 0.36, water: 0.60, sat: 0.44, mood: -0.04 }, // alpine blue, pine green
+            { h: 0.06, flora: 0.08, soil: 0.01, accent: 0.53, creature: 0.58, water: 0.54, sat: 0.50, mood: 0.02 }, // clay, muted aqua
+            { h: 0.79, flora: 0.10, soil: -0.06, accent: 0.18, creature: 0.15, water: 0.62, sat: 0.42, mood: -0.03 }, // dusk violet, brass
+            { h: 0.43, flora: 0.00, soil: -0.05, accent: 0.88, creature: 0.90, water: 0.57, sat: 0.46, mood: 0.01 }  // sage, rose sandstone
+        ];
+        const theme = themes[Math.floor(Math.random() * themes.length)];
+        const temperature = eco ? eco.temperature : 0.5;
+        const humidity = eco ? eco.humidity : 0.55;
+        const lightLevel = eco ? eco.lightLevel : 1.0;
         let hue;
         if (sphereColor) {
-            let base = sphereColor === 'red' ? 0.95 : sphereColor === 'blue' ? 0.6 : 0.1;
-            hue = (base + (Math.random() - 0.5) * 0.3) % 1;
-            if (hue < 0) hue += 1;
-        } else if (eco) {
-            // Tighter jitter than the string branch: eco worlds should stay
-            // recognizably in-theme across reseeds (a scorched world must
-            // never roll green).
-            hue = (0.68 * (1 - eco.temperature) + (Math.random() - 0.5) * 0.12 + 1) % 1;
+            const explicit = sphereColor === 'red' ? 0.985 : sphereColor === 'blue' ? 0.63 : 0.10;
+            hue = (explicit + (Math.random() - 0.5) * 0.045 + 1) % 1;
         } else {
-            hue = Math.random();
+            const climateHue = 0.68 * (1 - temperature);
+            const delta = ((climateHue - theme.h + 1.5) % 1) - 0.5;
+            hue = (theme.h + delta * 0.18 + (Math.random() - 0.5) * 0.03 + 1) % 1;
         }
-        const satMult = eco ? 0.6 + 0.4 * eco.humidity : 1;
-        const lightMult = eco ? 0.55 + 0.45 * eco.lightLevel : 1;
-        const baseDark = new THREE.Color().setHSL(hue, 0.2, 0.15 * lightMult);
-        const soil = new THREE.Color().setHSL((hue + 0.05) % 1, 0.3, 0.25 * lightMult);
-        const floraHue = (hue + 0.2 + Math.random() * 0.4) % 1;
-        const flora = new THREE.Color().setHSL(floraHue, (0.5 + Math.random() * 0.4) * satMult, (0.3 + Math.random() * 0.3) * lightMult);
-        const groundTop = flora.clone().multiplyScalar(0.75);
-        // Grass gets its own hue derived from flora (shifted warmer, slightly
-        // different sat/light) so ground cover reads as a distinct material
-        // from tree canopy instead of aliasing to the same color.
-        const grassHue = (floraHue + 0.06 + Math.random() * 0.04) % 1;
-        const tallGrass = new THREE.Color().setHSL(grassHue, (0.55 + Math.random() * 0.35) * satMult, (0.32 + Math.random() * 0.28) * lightMult);
-        const creatureHue = (floraHue + 0.5) % 1;
-        const creature = new THREE.Color().setHSL(creatureHue, 0.8, 0.6);
-        const accent = new THREE.Color().setHSL((creatureHue + 0.2) % 1, 0.9, 0.6);
-        const background = new THREE.Color().setHSL((hue + 0.5) % 1, 0.3, 0.8);
-        return { background, baseRock: baseDark, trunk: baseDark, soil, groundTop, flora, tallGrass, creature, accent };
+        const clamp01 = (v) => Math.max(0, Math.min(1, v));
+        const hsl = (h, sat, light) => new THREE.Color().setHSL((h + 1) % 1, clamp01(sat), Math.min(0.78, Math.max(0.06, light)));
+        const brightness = clamp01(0.70 + lightLevel * 0.22);
+        const sat = theme.sat + humidity * 0.10;
+        const floraHue = (hue + theme.flora + (Math.random() - 0.5) * 0.025 + 1) % 1;
+        const soilHue = (hue + theme.soil + 1) % 1;
+        const accentHue = (theme.accent + (hue - theme.h) * 0.12 + 1) % 1;
+        const creatureHue = (accentHue + theme.creature * 0.08 + (Math.random() - 0.5) * 0.03 + 1) % 1;
+
+        const baseRock = hsl(hue, 0.17 + humidity * 0.06, (0.16 + theme.mood) * brightness);
+        const soil = hsl(soilHue, 0.24 + humidity * 0.08, (0.26 + theme.mood) * brightness);
+        const groundTop = hsl(floraHue - 0.018, sat * 0.62, (0.33 + humidity * 0.05 + theme.mood) * brightness);
+        const flora = hsl(floraHue, sat * 0.88, (0.41 + humidity * 0.06 + theme.mood) * brightness);
+        const floraAccent = hsl(floraHue + 0.035, sat * 0.76, (0.53 + humidity * 0.04 + theme.mood) * brightness);
+        const tallGrass = hsl(floraHue - 0.022, sat * 0.82, (0.46 + humidity * 0.05 + theme.mood) * brightness);
+        const creature = hsl(creatureHue, 0.42 + humidity * 0.07, (0.53 + theme.mood) * brightness);
+        const accent = hsl(accentHue, 0.52, (0.61 + theme.mood * 0.5) * brightness);
+        const background = hsl(hue + 0.44, 0.22, 0.56 + theme.mood * 0.4);
+        const skyGlow = hsl(hue + 0.22, 0.34, 0.60 + theme.mood * 0.35);
+        const water = hsl(theme.water + (hue - theme.h) * 0.08, 0.46 + humidity * 0.06, (0.44 + theme.mood * 0.2) * brightness);
+        const waterDeep = water.clone().offsetHSL(-0.02, -0.02, -0.18);
+        const shadow = hsl(hue + 0.48, 0.22, 0.10);
+        const sunlit = hsl(accentHue - 0.02, 0.28, 0.70);
+        const trunk = soil.clone().lerp(baseRock, 0.45);
+        return { background, baseRock, trunk, soil, groundTop, flora, floraAccent, tallGrass, creature, accent, skyGlow, water, waterDeep, shadow, sunlit };
     }
 
     generateWorldDNA() {
@@ -73,12 +92,30 @@ export default class EntityFactory {
             conehead: { scaleMin: 1.2, scaleMax: 1.8, speed: 0.02, temperament: 0.5 }
         };
         const stats = speciesStats[speciesType];
+        const treeArchetypes = ['umbrella', 'bulb', 'spire', 'coral', 'fan', 'spiral'];
+        const bushArchetypes = ['coral', 'succulent', 'pod', 'fan', 'anemone'];
+        const grassVariants = ['meadow', 'fern', 'reed', 'ribbon', 'spore'];
+        const flowerFamilies = ['star', 'orb', 'cup', 'pinwheel', 'cluster'];
         return {
-            tree: { shape: ['cone', 'box', 'round', 'cylinder'][Math.floor(Math.random() * 4)], heightMod: 1.2 + Math.random() * 1.0, thickMod: 0.6 + Math.random() },
-            bush: { shape: ['sphere', 'cone'][Math.floor(Math.random() * 2)], scaleY: 0.7 + Math.random() * 0.5 },
+            tree: {
+                shape: ['cone', 'box', 'round', 'cylinder'][Math.floor(Math.random() * 4)],
+                archetype: treeArchetypes[Math.floor(Math.random() * treeArchetypes.length)],
+                heightMod: 1.15 + Math.random() * 0.95,
+                thickMod: 0.55 + Math.random() * 0.85,
+                canopyLayers: 2 + Math.floor(Math.random() * 3),
+                twist: (Math.random() - 0.5) * 0.55
+            },
+            bush: {
+                shape: ['sphere', 'cone', 'round'][Math.floor(Math.random() * 3)],
+                archetype: bushArchetypes[Math.floor(Math.random() * bushArchetypes.length)],
+                scaleY: 0.7 + Math.random() * 0.5,
+                lobes: 3 + Math.floor(Math.random() * 4),
+                berries: Math.random() > 0.45
+            },
             rock: { shape: ['ico', 'box', 'dodec', 'slab'][Math.floor(Math.random() * 4)], stretch: 0.8 + Math.random() * 0.8 },
-            creature: { shape: shape, speciesType: speciesType, eyes: eyeCount, scale: stats.scaleMin + Math.random() * (stats.scaleMax - stats.scaleMin), eyeScale: 1.0 + Math.random() * 0.6, moveSpeed: stats.speed, temperament: stats.temperament },
-            grass: { height: 0.3 + Math.random() * 0.5 }
+            creature: { shape: shape, speciesType: speciesType, eyes: eyeCount, scale: stats.scaleMin + Math.random() * (stats.scaleMax - stats.scaleMin), eyeScale: 1.0 + Math.random() * 0.6, moveSpeed: stats.speed, temperament: stats.temperament, trait: ['antennae', 'shell', 'ears', 'crest', 'tail'][Math.floor(Math.random() * 5)], markings: 1 + Math.floor(Math.random() * 4) },
+            grass: { height: 0.3 + Math.random() * 0.5, variant: grassVariants[Math.floor(Math.random() * grassVariants.length)] },
+            flower: { family: flowerFamilies[Math.floor(Math.random() * flowerFamilies.length)] }
         };
     }
 
@@ -293,11 +330,11 @@ export default class EntityFactory {
     distortGeometryFBM(geometry, planetSeed, amplitude) {
         const merged = this.mergeVertices(geometry);
         const posAttribute = merged.attributes.position;
-        const baseFreq = 1.5;
         const octaves = [
-            { freq: baseFreq, amp: amplitude },
-            { freq: baseFreq * 2.1, amp: amplitude * 0.5 },
-            { freq: baseFreq * 4.3, amp: amplitude * 0.25 }
+            { freq: 1.10, amp: amplitude },
+            { freq: 2.25, amp: amplitude * 0.52 },
+            { freq: 4.80, amp: amplitude * 0.24 },
+            { freq: 9.60, amp: amplitude * 0.11 }
         ];
         for (let i = 0; i < posAttribute.count; i++) {
             const x = posAttribute.getX(i);
@@ -310,13 +347,27 @@ export default class EntityFactory {
             for (const oct of octaves) {
                 noise += this._valueNoise3(
                     nx * oct.freq + planetSeed,
-                    ny * oct.freq + planetSeed * 1.3,
-                    nz * oct.freq + planetSeed * 0.7
+                    ny * oct.freq + planetSeed * 1.31,
+                    nz * oct.freq + planetSeed * 0.73
                 ) * oct.amp;
             }
-            posAttribute.setX(i, x + nx * noise);
-            posAttribute.setY(i, y + ny * noise);
-            posAttribute.setZ(i, z + nz * noise);
+            // A small ridged component makes shallow knuckles and hummocks visible
+            // between the broad hills without turning the terrain into spikes.
+            const ridgeSample = this._valueNoise3(
+                nx * 6.7 + planetSeed * 0.41,
+                ny * 6.7 + planetSeed * 0.89,
+                nz * 6.7 + planetSeed * 1.17
+            );
+            const ridge = (0.5 - Math.abs(ridgeSample)) * amplitude * 0.34;
+            const micro = this._valueNoise3(
+                nx * 14.5 + planetSeed * 1.7,
+                ny * 14.5 + planetSeed * 0.3,
+                nz * 14.5 + planetSeed * 2.1
+            ) * amplitude * 0.075;
+            const displacement = noise + ridge + micro;
+            posAttribute.setX(i, x + nx * displacement);
+            posAttribute.setY(i, y + ny * displacement);
+            posAttribute.setZ(i, z + nz * displacement);
         }
         posAttribute.needsUpdate = true;
         merged.computeVertexNormals();
@@ -407,9 +458,9 @@ export default class EntityFactory {
         // flatShading property (was always a silent no-op / console warning) —
         // smoothing here actually comes from the geometry never calling
         // computeVertexNormals() with flat winding, not from this option.
-        const coreMat = new THREE.MeshToonMaterial({ color: palette.baseRock });
-        const soilMat = new THREE.MeshToonMaterial({ color: palette.soil });
-        const surfaceMat = new THREE.MeshToonMaterial({ color: palette.groundTop });
+        const coreMat = this.getMat(palette.baseRock, true);
+        const soilMat = this.getMat(palette.soil, true);
+        const surfaceMat = this.getMat(palette.groundTop, false);
 
         // Core/soil/surface layers use distortGeometryFBM (coherent multi-octave
         // noise) instead of distortGeometryRadial — amplitudes chosen so the
@@ -420,14 +471,16 @@ export default class EntityFactory {
 
         // Core rock layer
         const coreGeoRaw = new THREE.IcosahedronGeometry(radius * 0.95, detail);
-        const coreGeo = this.distortGeometryFBM(coreGeoRaw, planetSeed + 1, radius * 0.023);
+        const coreGeo = this.distortGeometryFBM(coreGeoRaw, planetSeed + 1, radius * 0.019);
         const core = new THREE.Mesh(coreGeo, coreMat);
+        core.receiveShadow = true;
         g.add(core);
 
         // Soil layer
         const soilGeoRaw = new THREE.IcosahedronGeometry(radius * 0.98, detail);
-        const soilGeo = this.distortGeometryFBM(soilGeoRaw, planetSeed + 2, radius * 0.017);
+        const soilGeo = this.distortGeometryFBM(soilGeoRaw, planetSeed + 2, radius * 0.016);
         const soil = new THREE.Mesh(soilGeo, soilMat);
+        soil.receiveShadow = true;
         g.add(soil);
 
         // Surface (grass) layer - the main collision surface
@@ -436,8 +489,10 @@ export default class EntityFactory {
         // terrain instead of near-perfect spheres. Safe for gameplay — player,
         // creature, and prop placement all sample the real displaced mesh via
         // SphericalUtils.sampleTerrainHeight, not the nominal radius.
-        const surfaceGeo = this.distortGeometryFBM(surfaceGeoRaw, planetSeed + 3, radius * 0.016);
+        const relief = radius * (0.021 + (eco ? eco.humidity * 0.004 + eco.toxicity * 0.003 : 0.002));
+        const surfaceGeo = this.distortGeometryFBM(surfaceGeoRaw, planetSeed + 3, relief);
         const surface = new THREE.Mesh(surfaceGeo, surfaceMat);
+        surface.receiveShadow = true;
         surface.userData = { type: 'ground' };
         g.add(surface);
 
@@ -527,6 +582,12 @@ export default class EntityFactory {
             g.add(atmos);
             atmosphereInfo = { mesh: atmos, shellRadius: radius * atmosScale };
         }
+
+        // A low-cost palette light gives metallic tools, ship panels and water
+        // sparkles a local colored stage glow; unlit terrain and organisms ignore it.
+        const planetGlow = new THREE.PointLight(palette.skyGlow || palette.accent, 0.42 * (eco ? eco.lightLevel : 1), radius * 3.4, 2.0);
+        planetGlow.position.set(radius * 0.35, radius * 1.15, radius * 0.30);
+        g.add(planetGlow);
 
         g.position.set(cx, cy, cz);
 
@@ -670,10 +731,9 @@ export default class EntityFactory {
         // so ore chunks read as "glowing gold" and are spottable from a distance instead
         // of blending into the rock — gold only spawns on Ancient Peaks and players had
         // no visual cue to notice it.
-        const goldMat = new THREE.MeshToonMaterial({
-            color: 0xffd700,
-            emissive: 0xffd700,
-            emissiveIntensity: 0.6
+        const goldMat = new THREE.MeshStandardMaterial({
+            color: 0xffd700, emissive: 0x8a5900, emissiveIntensity: 0.65,
+            roughness: 0.34, metalness: 0.72
         });
 
         // Distort the stone body only — same subtle-lumpiness factor as
@@ -720,7 +780,7 @@ export default class EntityFactory {
         const g = new THREE.Group();
         const stoneMat = this.getMat(p.baseRock.clone().lerp(new THREE.Color(0x333333), 0.5));
         const tint = kind === 'fire_crystal' ? 0xff5522 : 0x7de8ff;
-        const crystalMat = new THREE.MeshToonMaterial({ color: tint, emissive: tint, emissiveIntensity: 0.7 });
+        const crystalMat = new THREE.MeshStandardMaterial({ color: tint, emissive: tint, emissiveIntensity: 0.9, roughness: 0.24, metalness: 0.12 });
 
         const baseGeo = this.distortGeometryRadial(
             new THREE.DodecahedronGeometry(0.7 * scale, 0),
@@ -780,105 +840,339 @@ export default class EntityFactory {
      */
     createPond(p, x, z, scale = 1.0) {
         const g = new THREE.Group();
-        const shore = new THREE.Mesh(
-            new THREE.CircleGeometry(1.35 * scale, 18),
-            this.getMat(p.soil.clone().lerp(new THREE.Color(0x223344), 0.4))
-        );
-        shore.rotation.x = -Math.PI / 2;
-        shore.position.y = 0.04;
-        g.add(shore);
-        const water = new THREE.Mesh(
-            new THREE.CircleGeometry(1.1 * scale, 18),
-            new THREE.MeshToonMaterial({ color: 0x3f9df5, transparent: true, opacity: 0.85 })
-        );
+        const makeBlob = (radius, segments, wobble) => {
+            const shape = new THREE.Shape();
+            for (let i = 0; i < segments; i++) {
+                const a = (i / segments) * Math.PI * 2;
+                const r = radius * (1 + Math.sin(a * 3 + scale) * wobble + Math.sin(a * 5 - scale * 0.7) * wobble * 0.45);
+                const px = Math.cos(a) * r;
+                const py = Math.sin(a) * r;
+                if (i === 0) shape.moveTo(px, py); else shape.lineTo(px, py);
+            }
+            shape.closePath();
+            return new THREE.ShapeGeometry(shape);
+        };
+
+        const bankGeo = makeBlob(1.38 * scale, 26, 0.09);
+        const bank = new THREE.Mesh(bankGeo, this.getMat(p.soil.clone().lerp(p.waterDeep || new THREE.Color(0x163c5d), 0.34), false));
+        bank.rotation.x = -Math.PI / 2;
+        bank.position.y = 0.025;
+        g.add(bank);
+
+        const waterColor = (p.water || new THREE.Color(0x38bce8)).clone();
+        const waterGeo = makeBlob(1.14 * scale, 26, 0.075);
+        const water = new THREE.Mesh(waterGeo, new THREE.MeshBasicMaterial({
+            color: waterColor, transparent: true, opacity: 0.78, depthWrite: false
+        }));
         water.rotation.x = -Math.PI / 2;
-        water.position.y = 0.09;
+        water.position.y = 0.075;
         g.add(water);
+
+        const shimmer = new THREE.Mesh(
+            new THREE.CircleGeometry(0.58 * scale, 20),
+            new THREE.MeshBasicMaterial({
+                color: p.skyGlow || p.accent, transparent: true, opacity: 0.18,
+                depthWrite: false, blending: THREE.AdditiveBlending
+            })
+        );
+        shimmer.rotation.x = -Math.PI / 2;
+        shimmer.scale.set(1.35, 0.58, 1);
+        shimmer.position.set(-0.20 * scale, 0.086, -0.12 * scale);
+        g.add(shimmer);
+
+        // Reeds make ponds read as ecological features instead of flat decals.
+        const reedMat = this.getMat(p.tallGrass || p.flora, true);
+        const seedMat = this.getMat(p.floraAccent || p.accent, true);
+        for (let i = 0; i < 7; i++) {
+            const a = (i / 7) * Math.PI * 2 + scale * 0.4;
+            const r = 1.12 * scale * (0.94 + (i % 2) * 0.08);
+            const h = 0.38 + (i % 3) * 0.12;
+            const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.025, h, 5), reedMat);
+            stem.position.set(Math.cos(a) * r, h * 0.5, Math.sin(a) * r);
+            stem.rotation.z = Math.sin(a) * 0.10;
+            g.add(stem);
+            if (i % 2 === 0) {
+                const seed = new THREE.Mesh(new THREE.SphereGeometry(0.055, 5, 4), seedMat);
+                seed.position.set(Math.cos(a) * r, h + 0.04, Math.sin(a) * r);
+                seed.scale.y = 1.6;
+                g.add(seed);
+            }
+        }
         g.position.set(x, 0, z);
-        g.userData = { type: 'pond', radius: 1.35 * scale, heightOffset: 0.05 };
+        g.userData = { type: 'pond', radius: 1.42 * scale, heightOffset: 0.035, water, shimmer, phase: Math.random() * Math.PI * 2 };
         return g;
     }
 
     createTree(p, x, z, style = null) {
         const g = new THREE.Group();
+        const treeChoices = ['umbrella', 'bulb', 'spire', 'coral', 'fan', 'spiral'];
         const dna = style || {
-            color: p.flora.clone(), trunkColor: p.trunk.clone(), shape: this.state.worldDNA.tree.shape,
-            height: 1.5 * this.state.worldDNA.tree.heightMod + Math.random() * 0.5, thickness: 0.2 * this.state.worldDNA.tree.thickMod
+            color: p.flora.clone(), accentColor: (p.floraAccent || p.accent).clone(), trunkColor: p.trunk.clone(), shape: this.state.worldDNA.tree.shape,
+            archetype: this.state.worldDNA.tree.archetype || treeChoices[Math.floor(Math.random() * treeChoices.length)],
+            height: 1.45 * this.state.worldDNA.tree.heightMod + Math.random() * 0.55, thickness: 0.18 * this.state.worldDNA.tree.thickMod,
+            canopyLayers: this.state.worldDNA.tree.canopyLayers || 3, twist: this.state.worldDNA.tree.twist || 0
         };
-        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(dna.thickness * 0.7, dna.thickness, dna.height, 5), this.getMat(dna.trunkColor));
-        trunk.position.y = dna.height / 2;
-        g.add(trunk);
+        if (!dna.archetype) dna.archetype = treeChoices[Math.floor(Math.random() * treeChoices.length)];
 
-        // Layered canopy (2-3 volumes) instead of one lone primitive —
-        // silhouette upgrade keyed off worldDNA.tree.shape. Each layer gets
-        // a slight per-layer lightness jitter so the stack reads as depth
-        // instead of one flat-colored blob. Bounded to 2-3 meshes/tree
-        // (~51 trees total across all planets, so draw-call cost stays low).
-        const layerColor = (i) => dna.color.clone().offsetHSL(0, 0, (Math.random() - 0.5) * 0.08 - i * 0.02);
-        if (dna.shape === 'cone') {
-            // Stacked decreasing cones = pine silhouette
-            const layerCount = 2 + Math.floor(Math.random() * 2); // 2-3
-            let y = dna.height;
-            for (let i = 0; i < layerCount; i++) {
-                const shrink = 1 - i * 0.25;
-                const coneH = 1.5 * shrink;
-                const cone = new THREE.Mesh(new THREE.ConeGeometry(1.0 * shrink, coneH, 5), this.getMat(layerColor(i)));
-                cone.position.y = y + coneH * 0.5;
-                g.add(cone);
-                y += coneH * 0.55; // overlap so the stack reads continuous
+        const trunkMat = this.getMat(dna.trunkColor);
+        const foliageMat = this.getMat(dna.color);
+        const accentMat = this.getMat((dna.accentColor || dna.color).clone());
+        const height = dna.height;
+        const thickness = dna.thickness;
+        const organicCurve = (dna.twist || 0) + (Math.random() - 0.5) * 0.28;
+
+        let tip = new THREE.Vector3(0, height, 0);
+        let current = new THREE.Vector3(0, 0, 0);
+        const segs = 4 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < segs; i++) {
+            const t0 = i / segs;
+            const t1 = (i + 1) / segs;
+            const y0 = height * t0;
+            const y1 = height * t1;
+            const lateral0 = Math.sin(t0 * 1.8 + organicCurve * 2.6) * thickness * 0.95;
+            const lateral1 = Math.sin(t1 * 1.8 + organicCurve * 2.6) * thickness * 0.95;
+            const z0 = Math.cos(t0 * 1.4 + organicCurve * 1.7) * thickness * 0.55;
+            const z1 = Math.cos(t1 * 1.4 + organicCurve * 1.7) * thickness * 0.55;
+            const p0 = new THREE.Vector3(lateral0, y0, z0);
+            const p1 = new THREE.Vector3(lateral1, y1, z1);
+            const dir = p1.clone().sub(p0);
+            const len = dir.length();
+            const mid = p0.clone().add(p1).multiplyScalar(0.5);
+            const radiusTop = thickness * (0.88 - t1 * 0.45);
+            const radiusBottom = thickness * (1.0 - t0 * 0.32);
+            const seg = new THREE.Mesh(new THREE.CylinderGeometry(radiusTop, radiusBottom, len, 6), trunkMat);
+            seg.position.copy(mid);
+            seg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+            g.add(seg);
+            current.copy(p1);
+            if (i > 0 && i < segs - 1 && Math.random() < 0.45) {
+                const bLen = height * (0.16 + Math.random() * 0.10);
+                const a = organicCurve + i * 1.6 + Math.random() * 1.2;
+                const branch = new THREE.Mesh(new THREE.CylinderGeometry(thickness * 0.16, thickness * 0.23, bLen, 5), trunkMat);
+                branch.position.copy(p1.clone().add(new THREE.Vector3(Math.cos(a) * thickness * 0.22, bLen * 0.22, Math.sin(a) * thickness * 0.22)));
+                const branchDir = new THREE.Vector3(Math.cos(a) * 0.75, 0.65, Math.sin(a) * 0.75).normalize();
+                branch.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), branchDir);
+                g.add(branch);
+                const tipOrb = new THREE.Mesh(new THREE.SphereGeometry(thickness * 0.22, 5, 4), accentMat);
+                tipOrb.position.copy(branch.position).add(branchDir.clone().multiplyScalar(bLen * 0.56));
+                g.add(tipOrb);
             }
-        } else if (dna.shape === 'cylinder') {
-            // Layered discs (pagoda-style stack)
-            const layerCount = 2 + Math.floor(Math.random() * 2); // 2-3
-            let y = dna.height;
-            for (let i = 0; i < layerCount; i++) {
-                const shrink = 1 - i * 0.2;
-                const radius = 0.85 * shrink;
-                const discH = 0.4;
-                const disc = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 1.1, discH, 6), this.getMat(layerColor(i)));
-                disc.position.y = y + discH * 0.5;
-                g.add(disc);
-                y += discH + 0.15; // small gap between discs
+        }
+        tip.copy(current);
+
+        for (let i = 0; i < 3; i++) {
+            const a = i / 3 * Math.PI * 2 + organicCurve;
+            const root = new THREE.Mesh(new THREE.CylinderGeometry(thickness * 0.15, thickness * 0.28, thickness * 2.4, 5), trunkMat);
+            root.position.set(Math.cos(a) * thickness * 0.7, thickness * 0.25, Math.sin(a) * thickness * 0.7);
+            root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(Math.cos(a) * 0.88, 0.28, Math.sin(a) * 0.88).normalize());
+            g.add(root);
+        }
+
+        const archetype = dna.archetype;
+        if (archetype === 'umbrella') {
+            const canopy = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.15, 0.22, 8), foliageMat);
+            canopy.position.copy(tip.clone().add(new THREE.Vector3(0, 0.18, 0)));
+            canopy.scale.set(0.9 + Math.random() * 0.6, 1, 0.9 + Math.random() * 0.6);
+            g.add(canopy);
+            const crown = new THREE.Mesh(new THREE.SphereGeometry(0.42, 7, 6), accentMat);
+            crown.position.copy(canopy.position).add(new THREE.Vector3(0, 0.18, 0));
+            crown.scale.y = 0.55;
+            g.add(crown);
+            const fringeCount = 5 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < fringeCount; i++) {
+                const a = i / fringeCount * Math.PI * 2;
+                const frond = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.42 + Math.random() * 0.22, 0.07), accentMat);
+                frond.position.copy(canopy.position).add(new THREE.Vector3(Math.cos(a) * canopy.scale.x * 0.55, -0.06, Math.sin(a) * canopy.scale.z * 0.55));
+                frond.rotation.z = Math.cos(a) * 0.35;
+                frond.rotation.x = Math.sin(a) * 0.22;
+                g.add(frond);
             }
-        } else {
-            // box / round (dodeca): offset overlapping volumes = clumped canopy
-            const layerCount = 2 + Math.floor(Math.random() * 2); // 2-3
-            for (let i = 0; i < layerCount; i++) {
-                const layerScale = 1 - i * 0.2 + Math.random() * 0.1;
-                const volGeo = dna.shape === 'box' ? new THREE.BoxGeometry(1.2, 1.2, 1.2) : new THREE.DodecahedronGeometry(0.9);
-                const vol = new THREE.Mesh(volGeo, this.getMat(layerColor(i)));
-                vol.scale.setScalar(layerScale);
-                vol.position.set(
-                    (Math.random() - 0.5) * 0.5,
-                    dna.height + (Math.random() - 0.5) * 0.3,
-                    (Math.random() - 0.5) * 0.5
-                );
-                g.add(vol);
+        } else if (archetype === 'bulb') {
+            const bulbCount = 3 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < bulbCount; i++) {
+                const a = i / bulbCount * Math.PI * 2 + Math.random() * 0.4;
+                const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.38 + Math.random() * 0.12, 7, 6), i % 2 ? accentMat : foliageMat);
+                bulb.position.copy(tip).add(new THREE.Vector3(Math.cos(a) * 0.28, 0.18 + (Math.random() - 0.5) * 0.18, Math.sin(a) * 0.28));
+                bulb.scale.set(1.0, 0.9 + Math.random() * 0.5, 1.0);
+                g.add(bulb);
             }
+            const crown = new THREE.Mesh(new THREE.SphereGeometry(0.32, 6, 5), foliageMat);
+            crown.position.copy(tip).add(new THREE.Vector3(0, 0.42, 0));
+            crown.scale.y = 1.3;
+            g.add(crown);
+        } else if (archetype === 'spire') {
+            const capColorMat = Math.random() > 0.5 ? accentMat : foliageMat;
+            let y = 0.05;
+            const tiers = 3 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < tiers; i++) {
+                const r = 0.58 - i * 0.10;
+                const cap = new THREE.Mesh(new THREE.ConeGeometry(r, 0.55, 7), i === tiers - 1 ? accentMat : foliageMat);
+                cap.position.copy(tip).add(new THREE.Vector3(0, y, 0));
+                cap.scale.y = 0.8 + Math.random() * 0.35;
+                g.add(cap);
+                y += 0.38;
+            }
+            const seed = new THREE.Mesh(new THREE.SphereGeometry(0.14, 5, 4), capColorMat);
+            seed.position.copy(tip).add(new THREE.Vector3(0, y + 0.12, 0));
+            g.add(seed);
+        } else if (archetype === 'coral') {
+            const armCount = 4 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < armCount; i++) {
+                const a = i / armCount * Math.PI * 2 + Math.random() * 0.35;
+                const armLen = 0.7 + Math.random() * 0.35;
+                const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.16, armLen, 5), foliageMat);
+                const dir = new THREE.Vector3(Math.cos(a) * 0.85, 0.45 + Math.random() * 0.25, Math.sin(a) * 0.85).normalize();
+                arm.position.copy(tip).add(dir.clone().multiplyScalar(armLen * 0.42));
+                arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+                g.add(arm);
+                const blossom = new THREE.Mesh(new THREE.SphereGeometry(0.16 + Math.random() * 0.08, 6, 5), i % 2 ? accentMat : foliageMat);
+                blossom.position.copy(tip).add(dir.clone().multiplyScalar(armLen * 0.84));
+                blossom.scale.set(1.1, 0.7, 1.1);
+                g.add(blossom);
+            }
+            const hub = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 5), accentMat);
+            hub.position.copy(tip).add(new THREE.Vector3(0, 0.12, 0));
+            g.add(hub);
+        } else if (archetype === 'fan') {
+            const leafCount = 6 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < leafCount; i++) {
+                const a = i / leafCount * Math.PI * 2;
+                const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.78 + Math.random() * 0.22, 0.42), i % 3 === 0 ? accentMat : foliageMat);
+                leaf.position.copy(tip).add(new THREE.Vector3(Math.cos(a) * 0.14, 0.18, Math.sin(a) * 0.14));
+                leaf.rotation.y = -a;
+                leaf.rotation.z = 0.68 + Math.random() * 0.18;
+                leaf.rotation.x = (Math.random() - 0.5) * 0.18;
+                g.add(leaf);
+            }
+            const pod = new THREE.Mesh(new THREE.SphereGeometry(0.18, 6, 5), accentMat);
+            pod.position.copy(tip).add(new THREE.Vector3(0, 0.12, 0));
+            g.add(pod);
+        } else if (archetype === 'spiral') {
+            const coils = 5 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < coils; i++) {
+                const t = i / Math.max(1, coils - 1);
+                const a = t * Math.PI * 2.6 + organicCurve * 2.0;
+                const pod = new THREE.Mesh(new THREE.SphereGeometry(0.16 + (1 - t) * 0.07, 6, 5), i % 2 ? accentMat : foliageMat);
+                pod.position.copy(tip).add(new THREE.Vector3(Math.cos(a) * (0.26 + t * 0.12), 0.10 + t * 0.62, Math.sin(a) * (0.26 + t * 0.12)));
+                pod.scale.y = 0.75 + Math.random() * 0.45;
+                g.add(pod);
+            }
+            const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.10, 0.75, 5), trunkMat);
+            mast.position.copy(tip).add(new THREE.Vector3(0, 0.38, 0));
+            g.add(mast);
         }
 
         g.position.set(x, 0, z);
         g.rotation.y = Math.random() * Math.PI * 2;
         g.scale.set(0, 0, 0);
-        g.userData = { type: 'tree', radius: 0.6, style: dna, color: dna.color, productionTimer: Math.random() * 20, health: 5, choppable: true, heightOffset: 0 };
+        g.userData = { type: 'tree', radius: 0.68, style: dna, color: dna.color, productionTimer: Math.random() * 20, health: 5, choppable: true, heightOffset: 0 };
         this.state.obstacles.push(g);
         return g;
     }
 
     createBush(p, x, z, style = null) {
         const g = new THREE.Group();
-        const dna = style || { color: p.flora.clone(), shape: this.state.worldDNA.bush.shape, scaleY: this.state.worldDNA.bush.scaleY };
-        let geo = dna.shape === 'flat' ? new THREE.BoxGeometry(0.8, 0.1, 0.8) :
-            dna.shape === 'box' ? new THREE.BoxGeometry(0.6, 0.6, 0.6) :
-                dna.shape === 'cone' ? new THREE.ConeGeometry(0.4, 0.7, 5) : new THREE.DodecahedronGeometry(0.4);
-        const m = new THREE.Mesh(geo, this.getMat(dna.color));
-        m.position.y = dna.shape === 'flat' ? 0.05 : 0.35 * dna.scaleY;
-        if (dna.shape !== 'flat') m.scale.y = dna.scaleY;
-        g.add(m);
+        const bushChoices = ['coral', 'succulent', 'pod', 'fan', 'anemone'];
+        const dna = style || {
+            color: p.flora.clone(), accentColor: (p.floraAccent || p.accent).clone(),
+            shape: this.state.worldDNA.bush.shape, archetype: this.state.worldDNA.bush.archetype || bushChoices[Math.floor(Math.random() * bushChoices.length)],
+            scaleY: this.state.worldDNA.bush.scaleY, lobes: this.state.worldDNA.bush.lobes || 4, berries: this.state.worldDNA.bush.berries
+        };
+        if (!dna.archetype) dna.archetype = bushChoices[Math.floor(Math.random() * bushChoices.length)];
+        const mainMat = this.getMat(dna.color);
+        const accentMat = this.getMat((dna.accentColor || dna.color).clone());
+        const scaleY = dna.scaleY || 1;
+
+        if (dna.archetype === 'coral') {
+            const arms = 5 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < arms; i++) {
+                const a = i / arms * Math.PI * 2 + Math.random() * 0.3;
+                const h = 0.45 + Math.random() * 0.25;
+                const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.10, h, 5), i % 2 ? accentMat : mainMat);
+                const dir = new THREE.Vector3(Math.cos(a) * 0.65, 0.9, Math.sin(a) * 0.65).normalize();
+                arm.position.copy(dir.clone().multiplyScalar(h * 0.22));
+                arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+                g.add(arm);
+                const cap = new THREE.Mesh(new THREE.SphereGeometry(0.10 + Math.random() * 0.05, 5, 4), accentMat);
+                cap.position.copy(dir.clone().multiplyScalar(h * 0.46));
+                cap.scale.set(1.2, 0.7, 1.2);
+                g.add(cap);
+            }
+        } else if (dna.archetype === 'succulent') {
+            const leaves = 7 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < leaves; i++) {
+                const a = i / leaves * Math.PI * 2;
+                const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.16 + Math.random() * 0.05, 6, 5), i % 3 === 0 ? accentMat : mainMat);
+                leaf.position.set(Math.cos(a) * 0.20, 0.12 + (i % 2) * 0.04, Math.sin(a) * 0.20);
+                leaf.scale.set(0.8, 1.6, 0.55);
+                leaf.rotation.z = 0.65;
+                leaf.rotation.y = -a;
+                g.add(leaf);
+            }
+            const core = new THREE.Mesh(new THREE.SphereGeometry(0.12, 5, 4), accentMat);
+            core.position.y = 0.10;
+            core.scale.y = 0.65;
+            g.add(core);
+        } else if (dna.archetype === 'pod') {
+            const stems = 4 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < stems; i++) {
+                const a = i / stems * Math.PI * 2 + Math.random() * 0.2;
+                const h = 0.38 + Math.random() * 0.28;
+                const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.038, h, 5), mainMat);
+                stem.position.set(Math.cos(a) * 0.10, h * 0.5, Math.sin(a) * 0.10);
+                stem.rotation.z = Math.cos(a) * 0.20;
+                stem.rotation.x = Math.sin(a) * 0.18;
+                g.add(stem);
+                const pod = new THREE.Mesh(new THREE.SphereGeometry(0.11 + Math.random() * 0.04, 5, 4), i % 2 ? accentMat : mainMat);
+                pod.position.set(Math.cos(a) * 0.16, h, Math.sin(a) * 0.16);
+                pod.scale.y = 1.45;
+                g.add(pod);
+            }
+        } else if (dna.archetype === 'fan') {
+            const leaves = 5 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < leaves; i++) {
+                const a = (-0.7 + i / Math.max(1, leaves - 1) * 1.4) + (Math.random() - 0.5) * 0.1;
+                const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.58 + Math.random() * 0.16, 0.22), i % 2 ? accentMat : mainMat);
+                leaf.position.set(Math.sin(a) * 0.18, 0.28, Math.cos(a) * 0.06);
+                leaf.rotation.z = a;
+                leaf.rotation.x = -0.28;
+                g.add(leaf);
+            }
+            const base = new THREE.Mesh(new THREE.SphereGeometry(0.10, 5, 4), mainMat);
+            base.position.y = 0.08;
+            g.add(base);
+        } else if (dna.archetype === 'anemone') {
+            const tendrils = 8 + Math.floor(Math.random() * 4);
+            for (let i = 0; i < tendrils; i++) {
+                const a = i / tendrils * Math.PI * 2;
+                const h = 0.32 + Math.random() * 0.14;
+                const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, h, 0.05), i % 4 === 0 ? accentMat : mainMat);
+                blade.position.set(Math.cos(a) * 0.16, h * 0.5, Math.sin(a) * 0.16);
+                blade.rotation.z = Math.cos(a) * 0.35;
+                blade.rotation.x = Math.sin(a) * 0.25;
+                g.add(blade);
+            }
+            const nucleus = new THREE.Mesh(new THREE.SphereGeometry(0.14, 6, 5), accentMat);
+            nucleus.position.y = 0.10;
+            nucleus.scale.y = 0.75;
+            g.add(nucleus);
+        }
+
+        if (dna.berries && Math.random() > 0.35) {
+            const pods = 3 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < pods; i++) {
+                const a = i / pods * Math.PI * 2 + Math.random() * 0.4;
+                const berry = new THREE.Mesh(new THREE.OctahedronGeometry(0.045 + Math.random() * 0.02, 0), accentMat);
+                berry.position.set(Math.cos(a) * 0.28, 0.18 + Math.random() * 0.20, Math.sin(a) * 0.28);
+                g.add(berry);
+            }
+        }
+
+        g.scale.y = scaleY;
         g.position.set(x, 0, z);
         g.rotation.y = Math.random() * Math.PI * 2;
-        g.scale.set(0, 0, 0);
-        g.userData = { type: 'bush', radius: 0.4, style: dna, color: dna.color, productionTimer: Math.random() * 20, heightOffset: 0 };
+        g.scale.x = 0; g.scale.z = 0; g.scale.y = 0;
+        g.userData = { type: 'bush', radius: 0.56, style: dna, color: dna.color, productionTimer: Math.random() * 20, heightOffset: 0 };
         return g;
     }
 
@@ -911,36 +1205,72 @@ export default class EntityFactory {
     createGrass(p, x, z, style = null) {
         const g = new THREE.Group();
         const h = (style ? style.height : this.state.worldDNA.grass.height);
-        const dna = style || { color: p.tallGrass.clone(), height: h };
-
-        // Clump of 3-5 blades (varied height/lean) merged into ONE
-        // BufferGeometry via mergeBoxGeometries — still a single draw call,
-        // same cost as the old lone blade, but reads as a tuft instead of a stick.
-        const bladeCount = 3 + Math.floor(Math.random() * 3); // 3-5
+        const variants = ['meadow', 'fern', 'reed', 'ribbon', 'spore'];
+        const dna = style || { color: p.tallGrass.clone(), accentColor: (p.floraAccent || p.accent).clone(), height: h, variant: this.state.worldDNA.grass.variant || variants[Math.floor(Math.random() * variants.length)] };
+        if (!dna.variant) dna.variant = variants[Math.floor(Math.random() * variants.length)];
         const parts = [];
-        for (let i = 0; i < bladeCount; i++) {
-            const bladeH = dna.height * (0.5 + Math.random() * 0.8); // 0.5x-1.3x base height
-            const bladeGeo = new THREE.BoxGeometry(0.06, bladeH, 0.06);
-            const spreadAngle = Math.random() * Math.PI * 2;
-            const spreadDist = Math.random() * 0.12;
-            const px = Math.cos(spreadAngle) * spreadDist;
-            const pz = Math.sin(spreadAngle) * spreadDist;
-            const leanAngle = Math.random() * 0.35; // tilt magnitude
-            const leanDir = Math.random() * Math.PI * 2; // tilt direction
-            const quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(leanAngle, leanDir, 0, 'YXZ'));
-            // base: lift the box so its bottom face sits at local y=0 (hinge point).
-            // rot: tilt/spin about that hinge (order matters — rotate before moving).
-            // trans: place the hinged blade at its offset within the clump footprint.
+        const addBlade = (w, bladeH, d, px, pz, rx, ry, rz) => {
+            const geo = new THREE.BoxGeometry(w, bladeH, d);
             const base = new THREE.Matrix4().makeTranslation(0, bladeH / 2, 0);
-            const rot = new THREE.Matrix4().makeRotationFromQuaternion(quat);
-            const trans = new THREE.Matrix4().makeTranslation(px, 0, pz);
-            const matrix = new THREE.Matrix4().multiplyMatrices(trans, rot).multiply(base);
-            parts.push({ geometry: bladeGeo, matrix });
+            const rot = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx || 0, ry || 0, rz || 0));
+            const trans = new THREE.Matrix4().makeTranslation(px || 0, 0, pz || 0);
+            parts.push({ geometry: geo, matrix: new THREE.Matrix4().multiplyMatrices(trans, rot).multiply(base) });
+        };
+
+        if (dna.variant === 'fern') {
+            addBlade(0.04, dna.height * 1.05, 0.04, 0, 0, 0, 0, 0);
+            for (let i = 0; i < 8; i++) {
+                const yRatio = (i + 1) / 9;
+                const leafLen = dna.height * (0.50 - yRatio * 0.20);
+                const side = i % 2 ? 1 : -1;
+                const geo = new THREE.BoxGeometry(leafLen, 0.04, 0.08);
+                const rot = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(0, side > 0 ? 0.20 : -0.20, side * (0.24 + yRatio * 0.18)));
+                const trans = new THREE.Matrix4().makeTranslation(side * leafLen * 0.42, dna.height * yRatio, 0);
+                parts.push({ geometry: geo, matrix: new THREE.Matrix4().multiplyMatrices(trans, rot) });
+            }
+        } else if (dna.variant === 'reed') {
+            for (let i = 0; i < 3; i++) {
+                const a = i * Math.PI * 2 / 3;
+                addBlade(0.045, dna.height * (1.05 + i * 0.16), 0.045, Math.cos(a) * 0.10, Math.sin(a) * 0.10, Math.sin(a) * 0.08, 0, Math.cos(a) * 0.08);
+            }
+        } else if (dna.variant === 'ribbon') {
+            const ribbonCount = 4 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < ribbonCount; i++) {
+                const a = i / ribbonCount * Math.PI * 2 + Math.random() * 0.5;
+                addBlade(0.06, dna.height * (0.95 + Math.random() * 0.55), 0.03, Math.cos(a) * 0.08, Math.sin(a) * 0.08, Math.sin(a) * 0.28, a, Math.cos(a) * 0.55);
+            }
+        } else if (dna.variant === 'spore') {
+            const stemCount = 4 + Math.floor(Math.random() * 2);
+            for (let i = 0; i < stemCount; i++) {
+                const a = i / stemCount * Math.PI * 2 + Math.random() * 0.25;
+                addBlade(0.035, dna.height * (0.55 + Math.random() * 0.35), 0.035, Math.cos(a) * 0.10, Math.sin(a) * 0.10, 0.10, 0, Math.cos(a) * 0.12);
+            }
+        } else {
+            const bladeCount = 5 + Math.floor(Math.random() * 4);
+            for (let i = 0; i < bladeCount; i++) {
+                const bladeH = dna.height * (0.65 + Math.random() * 0.75);
+                const a = Math.random() * Math.PI * 2;
+                const r = Math.random() * 0.14;
+                addBlade(0.048 + Math.random() * 0.015, bladeH, 0.04, Math.cos(a) * r, Math.sin(a) * r, Math.sin(a) * 0.26, a, Math.cos(a) * 0.22);
+            }
         }
+
         const clumpGeo = this.mergeBoxGeometries(parts);
         parts.forEach(part => part.geometry.dispose());
         const m = new THREE.Mesh(clumpGeo, this.getMat(dna.color));
         g.add(m);
+        if (dna.variant === 'reed' || dna.variant === 'spore') {
+            const headMat = this.getMat(dna.accentColor || p.accent, true);
+            const headCount = dna.variant === 'reed' ? 3 : 4;
+            for (let i = 0; i < headCount; i++) {
+                const a = i * Math.PI * 2 / headCount;
+                const head = new THREE.Mesh(new THREE.SphereGeometry(dna.variant === 'spore' ? 0.06 : 0.05, 5, 4), headMat);
+                head.scale.y = dna.variant === 'spore' ? 1.1 : 1.8;
+                const y = dna.variant === 'spore' ? dna.height * (0.70 + (i % 2) * 0.14) : dna.height * (1.04 + i * 0.16);
+                head.position.set(Math.cos(a) * 0.10, y, Math.sin(a) * 0.10);
+                g.add(head);
+            }
+        }
         g.position.set(x, 0, z);
         g.scale.set(0, 0, 0);
         g.userData = { type: 'grass', style: dna, color: dna.color, growTimer: Math.random() * 30, heightOffset: 0 };
@@ -949,44 +1279,115 @@ export default class EntityFactory {
 
     createFlower(p, x, z, style = null) {
         const g = new THREE.Group();
-        const dna = style || { stemColor: p.flora.clone(), petalColor: p.background.clone().offsetHSL(0, 0, 0.1), centerColor: p.creature.clone(), height: 0.5 + Math.random() * 0.2 };
-        const stem = new THREE.Mesh(new THREE.BoxGeometry(0.05, dna.height, 0.05), this.getMat(dna.stemColor));
+        const families = ['star', 'orb', 'cup', 'pinwheel', 'cluster'];
+        const dna = style || {
+            stemColor: p.tallGrass.clone(),
+            petalColor: (p.floraAccent || p.background).clone().offsetHSL((Math.random() - 0.5) * 0.05, 0.04, 0.04),
+            centerColor: p.accent.clone(),
+            height: 0.34 + Math.random() * 0.34,
+            petals: 4 + Math.floor(Math.random() * 4),
+            family: families[Math.floor(Math.random() * families.length)]
+        };
+        if (!dna.family) dna.family = families[Math.floor(Math.random() * families.length)];
+        const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.024, dna.height, 5), this.getMat(dna.stemColor));
         stem.position.y = dna.height / 2;
-        const petals = new THREE.Mesh(new THREE.DodecahedronGeometry(0.15), this.getMat(dna.petalColor));
-        petals.position.y = dna.height;
-        const center = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.07), this.getMat(dna.centerColor));
-        center.position.y = dna.height + 0.1;
-        g.add(stem, petals, center);
+        g.add(stem);
+        const bloom = new THREE.Group();
+        bloom.position.y = dna.height;
+        const petalMat = this.getMat(dna.petalColor, true);
+        const centerMat = this.getMat(dna.centerColor, true);
+        const petalCount = dna.petals || 6;
+
+        if (dna.family === 'star') {
+            for (let i = 0; i < petalCount; i++) {
+                const a = i / petalCount * Math.PI * 2;
+                const petal = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.22, 0.05), petalMat);
+                petal.position.set(Math.cos(a) * 0.12, 0, Math.sin(a) * 0.12);
+                petal.rotation.y = -a;
+                petal.rotation.z = 0.55;
+                bloom.add(petal);
+            }
+            const center = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 5), centerMat);
+            bloom.add(center);
+        } else if (dna.family === 'orb') {
+            const orb = new THREE.Mesh(new THREE.SphereGeometry(0.12, 7, 6), petalMat);
+            orb.scale.y = 1.15;
+            bloom.add(orb);
+            const ringCount = 5 + Math.floor(Math.random() * 2);
+            for (let i = 0; i < ringCount; i++) {
+                const a = i / ringCount * Math.PI * 2;
+                const seed = new THREE.Mesh(new THREE.SphereGeometry(0.035, 5, 4), centerMat);
+                seed.position.set(Math.cos(a) * 0.10, 0.02, Math.sin(a) * 0.10);
+                bloom.add(seed);
+            }
+        } else if (dna.family === 'cup') {
+            for (let i = 0; i < petalCount; i++) {
+                const a = i / petalCount * Math.PI * 2;
+                const petal = new THREE.Mesh(new THREE.SphereGeometry(0.09, 5, 4), petalMat);
+                petal.scale.set(0.75, 1.25, 0.55);
+                petal.position.set(Math.cos(a) * 0.09, 0.03, Math.sin(a) * 0.09);
+                petal.rotation.y = -a;
+                petal.rotation.z = 0.28;
+                bloom.add(petal);
+            }
+            const center = new THREE.Mesh(new THREE.SphereGeometry(0.05, 5, 4), centerMat);
+            center.position.y = 0.05;
+            bloom.add(center);
+        } else if (dna.family === 'pinwheel') {
+            for (let i = 0; i < petalCount; i++) {
+                const a = i / petalCount * Math.PI * 2;
+                const petal = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.18, 0.05), i % 2 ? centerMat : petalMat);
+                petal.position.set(Math.cos(a) * 0.11, 0.01, Math.sin(a) * 0.11);
+                petal.rotation.y = -a;
+                petal.rotation.z = 0.72;
+                bloom.add(petal);
+            }
+            const center = new THREE.Mesh(new THREE.OctahedronGeometry(0.05, 0), centerMat);
+            bloom.add(center);
+        } else if (dna.family === 'cluster') {
+            const count = 4 + Math.floor(Math.random() * 4);
+            for (let i = 0; i < count; i++) {
+                const bud = new THREE.Mesh(new THREE.SphereGeometry(0.06, 5, 4), i % 3 === 0 ? centerMat : petalMat);
+                bud.position.set((Math.random() - 0.5) * 0.16, Math.random() * 0.08, (Math.random() - 0.5) * 0.16);
+                bud.scale.y = 1.0 + Math.random() * 0.7;
+                bloom.add(bud);
+            }
+        }
+
+        bloom.rotation.y = Math.random() * Math.PI;
+        g.add(bloom);
         g.position.set(x, 0, z);
+        g.rotation.y = Math.random() * Math.PI * 2;
         g.scale.set(0, 0, 0);
-        g.userData = { type: 'flower', style: dna, color: dna.petalColor, heightOffset: 0 };
+        g.userData = { type: 'flower', style: dna, color: dna.petalColor, heightOffset: 0, bloom };
         return g;
     }
 
     generateCreatureDNA(palette, speciesType = null) {
         const eyeRoll = Math.random();
-        const eyeCount = eyeRoll < 0.1 ? 1 : eyeRoll < 0.2 ? 3 : 2;
-        if (!speciesType) {
-            speciesType = ['blobby', 'blocky', 'conehead'][Math.floor(Math.random() * 3)];
-        }
+        const eyeCount = eyeRoll < 0.12 ? 1 : eyeRoll < 0.25 ? 3 : 2;
+        if (!speciesType) speciesType = ['blobby', 'blocky', 'conehead'][Math.floor(Math.random() * 3)];
         const speciesStats = {
-            blobby: { shape: 'sphere', scaleMin: 0.7, scaleMax: 1.0, speed: 0.04, temperament: 1.0 },
-            blocky: { shape: 'box', scaleMin: 0.9, scaleMax: 1.4, speed: 0.03, temperament: 1.5 },
-            conehead: { shape: 'cone', scaleMin: 1.2, scaleMax: 1.8, speed: 0.02, temperament: 0.5 }
+            blobby: { shape: 'sphere', scaleMin: 0.72, scaleMax: 1.12, speed: 0.042, temperament: 0.85, traits: ['antennae', 'shell', 'wings'] },
+            blocky: { shape: 'box', scaleMin: 0.92, scaleMax: 1.45, speed: 0.031, temperament: 1.45, traits: ['horns', 'plates', 'tail'] },
+            conehead: { shape: 'cone', scaleMin: 1.05, scaleMax: 1.62, speed: 0.036, temperament: 0.58, traits: ['ears', 'crest', 'tail'] }
         };
         const stats = speciesStats[speciesType];
-        const colorVar = Math.random() * 0.15;
-        const baseColor = palette.creature.clone();
-        baseColor.offsetHSL(colorVar, 0, 0);
+        const baseColor = palette.creature.clone().offsetHSL((Math.random() - 0.5) * 0.14, 0, (Math.random() - 0.5) * 0.08);
+        const accentColor = (palette.accent || palette.floraAccent).clone().offsetHSL((Math.random() - 0.5) * 0.08, 0, 0.04);
         return {
             color: baseColor,
+            accentColor,
             bodyShape: stats.shape,
-            speciesType: speciesType,
-            eyeCount: eyeCount,
+            speciesType,
+            eyeCount,
             scale: stats.scaleMin + Math.random() * (stats.scaleMax - stats.scaleMin),
-            eyeScale: 1.0 + Math.random() * 0.6,
-            moveSpeed: stats.speed,
-            temperament: stats.temperament
+            eyeScale: 0.92 + Math.random() * 0.78,
+            moveSpeed: stats.speed * (0.88 + Math.random() * 0.26),
+            temperament: stats.temperament,
+            trait: stats.traits[Math.floor(Math.random() * stats.traits.length)],
+            markings: 1 + Math.floor(Math.random() * 4),
+            glow: Math.random() > 0.72
         };
     }
 
@@ -998,7 +1399,11 @@ export default class EntityFactory {
             eyeCount: this.state.worldDNA.creature.eyes, scale: this.state.worldDNA.creature.scale,
             eyeScale: this.state.worldDNA.creature.eyeScale,
             moveSpeed: this.state.worldDNA.creature.moveSpeed,
-            temperament: this.state.worldDNA.creature.temperament
+            temperament: this.state.worldDNA.creature.temperament,
+            accentColor: (p.accent || p.floraAccent).clone(),
+            trait: this.state.worldDNA.creature.trait || 'antennae',
+            markings: this.state.worldDNA.creature.markings || 2,
+            glow: false
         };
         const bodyShape = dna.bodyShape;
         const scale = dna.scale || 1.0;
@@ -1061,6 +1466,75 @@ export default class EntityFactory {
                 else { animPivot.add(addEye(eyeX, eyeY, eyeZ, rot)); animPivot.add(addEye(-eyeX, eyeY, eyeZ, -rot)); animPivot.add(addEye(0, eyeY + 0.1, 0.25, 0)); }
             }
         }
+        const accentColor = dna.accentColor ? dna.accentColor.clone() : (p.accent || p.floraAccent).clone();
+        const detailMat = dna.glow
+            ? new THREE.MeshBasicMaterial({ color: accentColor, transparent: true, opacity: 0.96 })
+            : this.getMat(accentColor, true);
+        const darkDetailMat = this.getMat(dna.color.clone().multiplyScalar(0.48), true);
+
+        // Small planted feet keep the organisms from reading as floating primitives.
+        const footCount = bodyShape === 'cone' ? 3 : 4;
+        for (let i = 0; i < footCount; i++) {
+            const a = (i / footCount) * Math.PI * 2 + Math.PI * 0.25;
+            const foot = new THREE.Mesh(new THREE.SphereGeometry(0.055 * scale, 5, 4), darkDetailMat);
+            foot.scale.set(1.35, 0.55, 1.65);
+            foot.position.set(Math.cos(a) * 0.15 * scale, 0.015 * scale, Math.sin(a) * 0.15 * scale);
+            animPivot.add(foot);
+        }
+
+        const trait = dna.trait || 'antennae';
+        if (trait === 'antennae') {
+            for (const side of [-1, 1]) {
+                const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.014 * scale, 0.022 * scale, 0.30 * scale, 5), detailMat);
+                stalk.position.set(side * 0.10 * scale, 0.39 * scale, 0.02 * scale);
+                stalk.rotation.z = side * -0.30;
+                animPivot.add(stalk);
+                const tip = new THREE.Mesh(new THREE.OctahedronGeometry(0.045 * scale, 0), detailMat);
+                tip.position.set(side * 0.145 * scale, 0.53 * scale, 0.02 * scale);
+                animPivot.add(tip);
+            }
+        } else if (trait === 'shell' || trait === 'plates') {
+            const count = trait === 'shell' ? 1 : 3;
+            for (let i = 0; i < count; i++) {
+                const plate = new THREE.Mesh(new THREE.DodecahedronGeometry((trait === 'shell' ? 0.18 : 0.10) * scale, 0), detailMat);
+                plate.scale.set(1.0, trait === 'shell' ? 0.72 : 0.48, trait === 'shell' ? 1.22 : 0.65);
+                plate.position.set(0, (0.24 + i * 0.08) * scale, (-0.13 + i * 0.02) * scale);
+                animPivot.add(plate);
+            }
+        } else if (trait === 'wings') {
+            for (const side of [-1, 1]) {
+                const wing = new THREE.Mesh(new THREE.TetrahedronGeometry(0.16 * scale, 0), detailMat);
+                wing.scale.set(1.25, 0.22, 0.88);
+                wing.position.set(side * 0.22 * scale, 0.23 * scale, -0.04 * scale);
+                wing.rotation.z = side * -0.34;
+                animPivot.add(wing);
+            }
+        } else if (trait === 'horns' || trait === 'ears' || trait === 'crest') {
+            const count = trait === 'crest' ? 3 : 2;
+            for (let i = 0; i < count; i++) {
+                const side = count === 2 ? (i ? 1 : -1) : (i - 1);
+                const spike = new THREE.Mesh(new THREE.ConeGeometry(0.055 * scale, (trait === 'ears' ? 0.22 : 0.18) * scale, 5), detailMat);
+                spike.position.set(side * 0.12 * scale, (0.38 + (trait === 'crest' ? Math.abs(side) * -0.03 : 0)) * scale, (trait === 'crest' ? -0.01 : 0.02) * scale);
+                spike.rotation.z = side * (trait === 'ears' ? -0.35 : -0.18);
+                animPivot.add(spike);
+            }
+        } else if (trait === 'tail') {
+            for (let i = 0; i < 3; i++) {
+                const tail = new THREE.Mesh(new THREE.SphereGeometry((0.065 - i * 0.012) * scale, 5, 4), detailMat);
+                tail.scale.set(0.85, 0.75, 1.35);
+                tail.position.set((i - 1) * 0.025 * scale, (0.16 + i * 0.035) * scale, (-0.24 - i * 0.10) * scale);
+                animPivot.add(tail);
+            }
+        }
+
+        // Contrasting markings create species identity at gameplay distance.
+        for (let i = 0; i < Math.min(4, dna.markings || 0); i++) {
+            const mark = new THREE.Mesh(new THREE.OctahedronGeometry(0.035 * scale, 0), detailMat);
+            const a = (i / Math.max(1, dna.markings)) * Math.PI * 1.6 - Math.PI * 0.3;
+            mark.position.set(Math.sin(a) * 0.17 * scale, (0.17 + (i % 2) * 0.07) * scale, 0.19 * scale);
+            animPivot.add(mark);
+        }
+
         g.position.set(x, 0, z);
         g.scale.set(0, 0, 0);
         const radius = 0.5 * scale;
@@ -1145,8 +1619,8 @@ export default class EntityFactory {
 
     createPickaxe(palette, x, z) {
         const g = new THREE.Group();
-        const woodMaterial = new THREE.MeshToonMaterial({ color: 0x5d4037 });
-        const metalMaterial = new THREE.MeshToonMaterial({ color: 0x555555 });
+        const woodMaterial = this.getMat(0x5d4037);
+        const metalMaterial = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.34, metalness: 0.62 });
 
         const handleGeo = new THREE.CylinderGeometry(0.0125, 0.015, 0.5, 6);
         const handle = new THREE.Mesh(handleGeo, woodMaterial);
@@ -1175,9 +1649,9 @@ export default class EntityFactory {
 
     createAxe(palette, x, z) {
         const g = new THREE.Group();
-        const woodMaterial = new THREE.MeshToonMaterial({ color: 0x5d4037 });
-        const metalMaterial = new THREE.MeshToonMaterial({ color: 0x78909c });
-        const edgeMaterial = new THREE.MeshToonMaterial({ color: 0xeeeeee });
+        const woodMaterial = this.getMat(0x5d4037);
+        const metalMaterial = new THREE.MeshStandardMaterial({ color: 0x78909c, roughness: 0.34, metalness: 0.62 });
+        const edgeMaterial = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.18, metalness: 0.84 });
 
         const handleGeo = new THREE.CylinderGeometry(0.0125, 0.015, 0.5, 6);
         const handle = new THREE.Mesh(handleGeo, woodMaterial);
@@ -1251,10 +1725,10 @@ export default class EntityFactory {
 
     createSword(palette, x, z) {
         const g = new THREE.Group();
-        const woodMaterial = new THREE.MeshToonMaterial({ color: 0x5d4037 });
-        const guardMaterial = new THREE.MeshToonMaterial({ color: 0x8d6e63 });
-        const bladeMaterial = new THREE.MeshToonMaterial({ color: 0xcfd8dc });
-        const edgeMaterial = new THREE.MeshToonMaterial({ color: 0xeeeeee });
+        const woodMaterial = this.getMat(0x5d4037);
+        const guardMaterial = this.getMat(0x8d6e63);
+        const bladeMaterial = this.getMat(0xcfd8dc);
+        const edgeMaterial = this.getMat(0xeeeeee);
 
         const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.018, 0.14, 6), woodMaterial);
         g.add(grip);
@@ -1294,10 +1768,9 @@ export default class EntityFactory {
         const color = new THREE.Color(colorMap[boostData.stat] || 0xffffff);
 
         const crystalGeo = new THREE.OctahedronGeometry(0.15, 0);
-        const crystalMat = new THREE.MeshToonMaterial({
-            color: color,
-            emissive: color,
-            emissiveIntensity: 0.6
+        const crystalMat = new THREE.MeshStandardMaterial({
+            color: color, emissive: color, emissiveIntensity: 0.8,
+            roughness: 0.22, metalness: 0.1
         });
         const crystal = new THREE.Mesh(crystalGeo, crystalMat);
         crystal.position.y = 0.3;
@@ -1345,7 +1818,7 @@ export default class EntityFactory {
 
         // Cockpit dome
         const cockpitGeo = new THREE.SphereGeometry(0.5, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
-        const cockpitMat = new THREE.MeshToonMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5 });
+        const cockpitMat = new THREE.MeshPhysicalMaterial({ color: 0x4488ff, emissive: 0x102a55, emissiveIntensity: 0.25, roughness: 0.08, metalness: 0.05, transparent: true, opacity: 0.48, clearcoat: 1, clearcoatRoughness: 0.08 });
         const cockpit = new THREE.Mesh(cockpitGeo, cockpitMat);
         cockpit.position.set(0, 0.5, -0.8);
         hullPivot.add(cockpit);
@@ -1409,129 +1882,231 @@ export default class EntityFactory {
 
     createCat(x, z) {
         const g = new THREE.Group();
-        const orange = new THREE.Color(0xE8963E);
-        const white = new THREE.Color(0xFAF0E6);
-        const darkOrange = orange.clone().multiplyScalar(0.7);
-        const pink = new THREE.Color(0xFFB6C1);
-        const eyeGreen = new THREE.Color(0x6BA54A);
+        g.name = 'Procedural companion cat';
 
-        const body = new THREE.Mesh(
-            new THREE.BoxGeometry(0.45, 0.35, 0.7),
-            this.getMat(orange)
-        );
-        body.position.y = 0.35;
-        g.add(body);
+        // Cat-forward is local +Z, matching SphericalUtils.getOrientationOnSurface().
+        // The old model put the head on -Z, so it visually ran backward.
+        const orange = new THREE.Color(0xD98236);
+        const cream = new THREE.Color(0xF4E7D0);
+        const darkOrange = new THREE.Color(0x8F4A24);
+        const pink = new THREE.Color(0xEFA7A8);
+        const eyeGreen = new THREE.Color(0xA9D26A);
 
-        const belly = new THREE.Mesh(
-            new THREE.BoxGeometry(0.35, 0.12, 0.55),
-            this.getMat(white)
-        );
-        belly.position.set(0, 0.14, 0);
-        body.add(belly);
+        const furMat = new THREE.MeshStandardMaterial({ color: orange, roughness: 0.88, metalness: 0.0 });
+        const creamMat = new THREE.MeshStandardMaterial({ color: cream, roughness: 0.92, metalness: 0.0 });
+        const stripeMat = new THREE.MeshStandardMaterial({ color: darkOrange, roughness: 0.9, metalness: 0.0 });
+        const pinkMat = new THREE.MeshStandardMaterial({ color: pink, roughness: 0.8, metalness: 0.0 });
+        const eyeMat = new THREE.MeshStandardMaterial({ color: eyeGreen, emissive: 0x20370f, emissiveIntensity: 0.22, roughness: 0.36 });
+        const pupilMat = new THREE.MeshBasicMaterial({ color: 0x10120f });
+        const whiskerMat = new THREE.MeshBasicMaterial({ color: 0xf9f2e6 });
 
-        const head = new THREE.Mesh(
-            new THREE.BoxGeometry(0.38, 0.32, 0.32),
-            this.getMat(orange)
-        );
-        head.position.set(0, 0.48, -0.42);
-        g.add(head);
+        const bodyRoot = new THREE.Group();
+        bodyRoot.position.y = 0.02;
+        g.add(bodyRoot);
 
-        const muzzle = new THREE.Mesh(
-            new THREE.BoxGeometry(0.26, 0.16, 0.1),
-            this.getMat(white)
-        );
-        muzzle.position.set(0, -0.06, -0.14);
-        head.add(muzzle);
+        const hips = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 8), furMat);
+        hips.scale.set(0.88, 0.82, 1.18);
+        hips.position.set(0, 0.43, -0.18);
+        bodyRoot.add(hips);
 
-        const nose = new THREE.Mesh(
-            new THREE.BoxGeometry(0.06, 0.04, 0.04),
-            this.getMat(pink)
-        );
-        nose.position.set(0, -0.01, -0.18);
-        head.add(nose);
+        const chest = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 8), furMat);
+        chest.scale.set(0.9, 1.02, 1.06);
+        chest.position.set(0, 0.47, 0.17);
+        bodyRoot.add(chest);
 
-        const eyeGeo = new THREE.SphereGeometry(0.04, 6, 6);
-        const pupGeo = new THREE.SphereGeometry(0.02, 4, 4);
-        const eyeMat = this.getMat(eyeGreen);
-        const pupMat = this.getMat(0x111111);
+        const belly = new THREE.Mesh(new THREE.SphereGeometry(0.20, 10, 7), creamMat);
+        belly.scale.set(0.82, 0.48, 1.28);
+        belly.position.set(0, 0.29, 0.01);
+        bodyRoot.add(belly);
 
+        const spine = new SegmentMesh(bodyRoot, furMat, 8);
+        spine.set(new THREE.Vector3(0, 0.43, -0.18), new THREE.Vector3(0, 0.47, 0.17), 0.19);
+
+        const neck = new SegmentMesh(bodyRoot, furMat, 8);
+        const neckBase = new THREE.Vector3(0, 0.51, 0.28);
+        const neckTop = new THREE.Vector3(0, 0.63, 0.39);
+        neck.set(neckBase, neckTop, 0.13);
+
+        const headPivot = new THREE.Group();
+        headPivot.position.copy(neckTop);
+        bodyRoot.add(headPivot);
+
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 9), furMat);
+        head.scale.set(0.94, 0.9, 0.9);
+        head.position.z = 0.055;
+        headPivot.add(head);
+
+        const muzzleL = new THREE.Mesh(new THREE.SphereGeometry(0.085, 9, 7), creamMat);
+        const muzzleR = muzzleL.clone();
+        muzzleL.scale.set(1.0, 0.72, 0.78);
+        muzzleR.scale.copy(muzzleL.scale);
+        muzzleL.position.set(-0.065, -0.045, 0.205);
+        muzzleR.position.set(0.065, -0.045, 0.205);
+        headPivot.add(muzzleL, muzzleR);
+
+        const chin = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), creamMat);
+        chin.scale.set(1.15, 0.55, 0.8);
+        chin.position.set(0, -0.115, 0.16);
+        headPivot.add(chin);
+
+        const nose = new THREE.Mesh(new THREE.SphereGeometry(0.035, 7, 5), pinkMat);
+        nose.scale.set(1.15, 0.72, 0.72);
+        nose.position.set(0, -0.025, 0.267);
+        headPivot.add(nose);
+
+        const eyeGeo = new THREE.SphereGeometry(0.047, 9, 7);
+        const pupilGeo = new THREE.SphereGeometry(0.018, 7, 5);
+        const eyes = [];
+        const pupils = [];
         [-1, 1].forEach(side => {
             const eye = new THREE.Mesh(eyeGeo, eyeMat);
-            eye.position.set(side * 0.1, 0.04, -0.16);
-            head.add(eye);
-            const pupil = new THREE.Mesh(pupGeo, pupMat);
-            pupil.position.set(side * 0.1, 0.04, -0.19);
-            head.add(pupil);
+            eye.scale.set(1, 1.16, 0.55);
+            eye.position.set(side * 0.082, 0.055, 0.205);
+            headPivot.add(eye);
+            eyes.push(eye);
+
+            const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+            pupil.scale.set(0.58, 1.25, 0.46);
+            pupil.position.set(side * 0.082, 0.055, 0.236);
+            headPivot.add(pupil);
+            pupils.push(pupil);
         });
 
+        const ears = [];
         [-1, 1].forEach(side => {
-            const ear = new THREE.Mesh(
-                new THREE.ConeGeometry(0.07, 0.16, 4),
-                this.getMat(orange)
-            );
-            ear.position.set(side * 0.12, 0.2, -0.02);
-            ear.rotation.z = side * 0.2;
-            head.add(ear);
-            const innerEar = new THREE.Mesh(
-                new THREE.ConeGeometry(0.04, 0.1, 4),
-                this.getMat(pink)
-            );
-            innerEar.position.set(0, 0.01, -0.01);
-            ear.add(innerEar);
+            const earPivot = new THREE.Group();
+            earPivot.position.set(side * 0.13, 0.155, 0.015);
+            earPivot.rotation.z = -side * 0.08;
+            headPivot.add(earPivot);
+
+            const ear = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.22, 5), furMat);
+            ear.position.y = 0.08;
+            ear.rotation.x = -0.05;
+            earPivot.add(ear);
+
+            const inner = new THREE.Mesh(new THREE.ConeGeometry(0.052, 0.145, 5), pinkMat);
+            inner.position.set(0, 0.075, 0.016);
+            inner.scale.z = 0.64;
+            earPivot.add(inner);
+            ears.push(earPivot);
         });
 
-        const legGeo = new THREE.BoxGeometry(0.1, 0.2, 0.1);
-        const legMat = this.getMat(white);
-        const legPositions = [
-            { x: -0.14, z: -0.22 },
-            { x: 0.14, z: -0.22 },
-            { x: -0.14, z: 0.22 },
-            { x: 0.14, z: 0.22 }
+        // Forehead and cheek markings add readable feline structure without textures.
+        for (let i = -1; i <= 1; i++) {
+            const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.105, 0.012), stripeMat);
+            stripe.position.set(i * 0.055, 0.145 - Math.abs(i) * 0.012, 0.205);
+            stripe.rotation.z = i * -0.18;
+            headPivot.add(stripe);
+        }
+        [-1, 1].forEach(side => {
+            for (let i = 0; i < 2; i++) {
+                const cheekStripe = new SegmentMesh(headPivot, stripeMat, 4);
+                cheekStripe.set(
+                    new THREE.Vector3(side * (0.145 + i * 0.01), -0.005 - i * 0.045, 0.16),
+                    new THREE.Vector3(side * (0.205 + i * 0.012), -0.015 - i * 0.055, 0.125),
+                    0.012
+                );
+            }
+        });
+
+        // Whiskers are short tapered-looking rods, three per cheek.
+        [-1, 1].forEach(side => {
+            for (let i = 0; i < 3; i++) {
+                const whisker = new SegmentMesh(headPivot, whiskerMat, 4);
+                const y = -0.035 - i * 0.035;
+                whisker.set(
+                    new THREE.Vector3(side * 0.075, y, 0.245),
+                    new THREE.Vector3(side * (0.30 + i * 0.025), y + (1 - i) * 0.012, 0.27 - i * 0.018),
+                    0.006
+                );
+            }
+        });
+
+        const legSpecs = [
+            { name: 'frontLeft',  side: -1, front: true,  hip: new THREE.Vector3(-0.18, 0.46,  0.22), phase: 0 },
+            { name: 'frontRight', side:  1, front: true,  hip: new THREE.Vector3( 0.18, 0.46,  0.22), phase: Math.PI },
+            { name: 'hindLeft',   side: -1, front: false, hip: new THREE.Vector3(-0.18, 0.43, -0.22), phase: Math.PI },
+            { name: 'hindRight',  side:  1, front: false, hip: new THREE.Vector3( 0.18, 0.43, -0.22), phase: 0 },
         ];
-        const legs = [];
-        legPositions.forEach(lp => {
-            const leg = new THREE.Mesh(legGeo, legMat);
-            leg.position.set(lp.x, 0.1, lp.z);
-            g.add(leg);
-            legs.push(leg);
+
+        const legs = legSpecs.map(spec => {
+            const upper = new SegmentMesh(bodyRoot, furMat, 7);
+            const lower = new SegmentMesh(bodyRoot, creamMat, 7);
+            const joint = new THREE.Mesh(new THREE.SphereGeometry(0.052, 7, 5), furMat);
+            const paw = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), creamMat);
+            paw.scale.set(1.05, 0.48, 1.45);
+            bodyRoot.add(joint, paw);
+            return {
+                ...spec,
+                upper,
+                lower,
+                joint,
+                paw,
+                upperLength: spec.front ? 0.235 : 0.255,
+                lowerLength: spec.front ? 0.225 : 0.245,
+                footLocal: new THREE.Vector3(spec.hip.x, 0.055, spec.hip.z + (spec.front ? 0.06 : -0.04)),
+                targetLocal: new THREE.Vector3(),
+            };
         });
 
-        const tailBase = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.03, 0.04, 0.4, 4),
-            this.getMat(orange)
-        );
-        tailBase.position.set(0, 0.45, 0.4);
-        tailBase.rotation.x = 0.6;
-        g.add(tailBase);
+        const tailSegments = [];
+        for (let i = 0; i < 6; i++) {
+            tailSegments.push(new SegmentMesh(bodyRoot, i === 5 ? creamMat : furMat, 7));
+        }
 
-        const tailTip = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.02, 0.03, 0.2, 4),
-            this.getMat(white)
-        );
-        tailTip.position.set(0, 0.22, 0.02);
-        tailTip.rotation.x = -0.4;
-        tailBase.add(tailTip);
-
-        const chest = new THREE.Mesh(
-            new THREE.BoxGeometry(0.3, 0.25, 0.08),
-            this.getMat(white)
-        );
-        chest.position.set(0, 0.02, -0.32);
-        body.add(chest);
+        for (const object of g.children) object.castShadow = true;
+        g.traverse(object => {
+            if (object.isMesh) {
+                object.castShadow = true;
+                object.receiveShadow = true;
+            }
+        });
 
         g.position.set(x, 0, z);
         g.userData = {
             type: 'cat',
-            radius: 0.4,
-            legs: legs,
-            tail: tailBase,
-            moveSpeed: 0.06,
-            hopOffset: Math.random() * 100,
-            followDist: 1.8,
+            radius: 0.38,
+            moveSpeed: 3.0,
+            runSpeed: 5.4,
+            followDist: 1.65,
+            catchupDist: 5.2,
+            heightOffset: 0.018,
+            bodyRoot,
+            hips,
+            chest,
+            belly,
+            spine,
+            neck,
+            headPivot,
+            head,
+            eyes,
+            pupils,
+            ears,
+            legs,
+            // Kept for compatibility with any external cat tooling.
+            tail: tailSegments[0].mesh,
+            tailSegments,
+            velocity: new THREE.Vector3(),
+            forwardWorld: new THREE.Vector3(0, 0, 1),
+            lastPosition: new THREE.Vector3(x, 0, z),
+            speed: 0,
+            gaitPhase: Math.random() * Math.PI * 2,
+            turnLean: 0,
+            bodySpring: 0,
+            bodySpringVelocity: 0,
             idleTimer: 0,
+            wanderTimer: 1.5 + Math.random() * 2.5,
+            wanderAngle: Math.random() * Math.PI * 2,
+            blinkTimer: 1.2 + Math.random() * 3.0,
+            blinkAmount: 0,
+            earTwitchTimer: 1.0 + Math.random() * 2.0,
+            earTwitch: 0,
+            hopOffset: Math.random() * 100,
             isIdle: false,
-            heightOffset: 0
+            isSitting: false,
+            rigReady: true,
         };
         return g;
     }
 }
+

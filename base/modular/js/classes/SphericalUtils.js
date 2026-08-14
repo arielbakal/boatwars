@@ -5,7 +5,6 @@
 // Shared raycaster instance for terrain sampling — avoids per-call allocation.
 // Lazily initialized on first use so THREE global is guaranteed to be ready.
 let _terrainRaycaster = null;
-
 export default class SphericalUtils {
     /**
      * Get the surface normal (up direction) at a position on a planet.
@@ -235,35 +234,41 @@ export default class SphericalUtils {
      * @param {THREE.Vector3} dirNormalized - Unit vector pointing from center outward toward surface
      * @returns {number} Distance from planet.center to the real terrain surface
      */
-    static sampleTerrainHeight(planet, dirNormalized) {
-        if (!planet.groundMesh) return planet.radius;
+    static sampleTerrainSurface(planet, dirNormalized, pointTarget = new THREE.Vector3(), normalTarget = new THREE.Vector3()) {
+        const radial = dirNormalized.clone().normalize();
+        if (!planet.groundMesh) {
+            pointTarget.copy(planet.center).addScaledVector(radial, planet.radius);
+            normalTarget.copy(radial);
+            return { point: pointTarget, normal: normalTarget, radius: planet.radius };
+        }
 
-        // Lazy init: THREE is a CDN global, guaranteed present by first call time
         if (!_terrainRaycaster) _terrainRaycaster = new THREE.Raycaster();
-
-        // Ensure the mesh world matrix is current. In r128, Raycaster.intersectObject
-        // does NOT update matrices, and Mesh.raycast reads matrixWorld directly. At
-        // generation time (right after world.add, before the first render) the planet
-        // group's translation may not be baked in yet, so a stale identity matrix would
-        // make the ray miss any off-origin planet. updateWorldMatrix(true,false) walks
-        // up to the parent group so the planet offset is applied before we cast.
         planet.groundMesh.updateWorldMatrix(true, false);
-
-        // Start the ray from well outside the planet (1.5× radius ensures we're above any bump)
-        const rayOrigin = planet.center.clone().add(dirNormalized.clone().multiplyScalar(planet.radius * 1.5));
-        // Aim inward toward planet center
-        const rayDir = dirNormalized.clone().negate();
-
-        _terrainRaycaster.set(rayOrigin, rayDir);
-        // Only check the ground mesh, not the whole scene — cheaper and unambiguous
+        const rayOrigin = planet.center.clone().addScaledVector(radial, planet.radius * 1.65);
+        _terrainRaycaster.set(rayOrigin, radial.clone().negate());
         const hits = _terrainRaycaster.intersectObject(planet.groundMesh, false);
 
         if (hits.length > 0) {
-            // hits[0].point is the world-space intersection; measure from planet center
-            return hits[0].point.distanceTo(planet.center);
+            const hit = hits[0];
+            pointTarget.copy(hit.point);
+            if (hit.face) {
+                const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+                normalTarget.copy(hit.face.normal).applyMatrix3(normalMatrix).normalize();
+                // The ray may hit a reversed triangle winding on an inner-facing patch.
+                if (normalTarget.dot(radial) < 0) normalTarget.negate();
+            } else {
+                normalTarget.copy(radial);
+            }
+            return { point: pointTarget, normal: normalTarget, radius: hit.point.distanceTo(planet.center) };
         }
 
-        // Fallback: nominal radius keeps nothing from disappearing
-        return planet.radius;
+        pointTarget.copy(planet.center).addScaledVector(radial, planet.radius);
+        normalTarget.copy(radial);
+        return { point: pointTarget, normal: normalTarget, radius: planet.radius };
+    }
+
+    static sampleTerrainHeight(planet, dirNormalized) {
+        return SphericalUtils.sampleTerrainSurface(planet, dirNormalized).radius;
     }
 }
+
