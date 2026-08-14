@@ -2,8 +2,8 @@
 // INPUT HANDLER - Controls adapted for spherical planets
 // =====================================================
 
-import SphericalUtils from './SphericalUtils.js';
 import { SHIP_COLLISION_RADIUS, MINABLE_ROCK_TYPES } from '../constants.js';
+import SphericalUtils from './SphericalUtils.js';
 
 export default class InputHandler {
     constructor(engine) {
@@ -53,6 +53,7 @@ export default class InputHandler {
             // Inventory slots
             const idx = parseInt(k) - 1;
             if (idx >= 0 && idx < 8) {
+                if (state.breachEquipped) { state.breachEquipped = false; state.breachAiming = false; }
                 if (state.selectedSlot === idx) { state.selectedSlot = null; sfx.select(); }
                 else if (state.inventory[idx]) { state.selectedSlot = idx; sfx.select(); }
                 this.engine.updateInventory();
@@ -67,6 +68,15 @@ export default class InputHandler {
                     return; // Don't process other inputs if closing dialog
                 }
             }
+            // B toggles the Terrarium Breach ranged weapon. It is a permanent
+            // suit tool, separate from the eight survival inventory slots.
+            if (k === 'b' && state.phase === 'playing' && !e.repeat) {
+                if (this.engine.breachSystem && this.engine.breachSystem.toggleRifle()) {
+                    this.engine.updateInventory();
+                    this._heldToolType = null;
+                }
+            }
+
             // G to toggle camera mode (First/Third person)
             if (k === 'g' && state.phase === 'playing') {
                 state.player.cameraMode = state.player.cameraMode === 'third' ? 'first' : 'third';
@@ -156,7 +166,7 @@ export default class InputHandler {
             const invItem = state.inventory[state.selectedSlot];
             if (!invItem) return;
             const color = invItem.color || new THREE.Color(0xffffff);
-            const mat = new THREE.MeshToonMaterial({ color });
+            const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.72, metalness: type === 'rock' ? 0.06 : 0.0 });
             item = new THREE.Group();
 
             switch (type) {
@@ -255,8 +265,9 @@ export default class InputHandler {
                     state.player.cameraAngle.y -= e.movementY * state.sensitivity;
                     state.player.cameraAngle.y = Math.max(-1.5, Math.min(1.5, state.player.cameraAngle.y));
                 } else {
-                    // TPS: mouse up = orbit higher
-                    state.player.cameraAngle.y += e.movementY * state.sensitivity;
+                    // TPS: use the same direct look convention as first person:
+                    // mouse up raises the camera / aim, mouse down lowers it.
+                    state.player.cameraAngle.y -= e.movementY * state.sensitivity;
                     state.player.cameraAngle.y = Math.max(-0.3, Math.min(1.5, state.player.cameraAngle.y));
                 }
             } else {
@@ -271,6 +282,7 @@ export default class InputHandler {
         // Scroll — cycle inventory
         window.addEventListener('wheel', (e) => {
             if (state.phase !== 'playing') return;
+            if (state.breachEquipped) { state.breachEquipped = false; state.breachAiming = false; }
             if (e.deltaY > 0) state.selectedSlot = (state.selectedSlot === null ? 0 : (state.selectedSlot + 1) % 8);
             else state.selectedSlot = (state.selectedSlot === null ? 7 : (state.selectedSlot + 7) % 8);
             if (!state.inventory[state.selectedSlot]) {
@@ -286,6 +298,7 @@ export default class InputHandler {
             if (document.pointerLockElement === renderer.domElement) {
                 cursor.style.display = 'none';
             } else {
+                if (this.engine.breachSystem) this.engine.breachSystem.cancelAim();
                 cursor.style.display = 'block';
                 cursor.style.left = state.mouseX + 'px';
                 cursor.style.top = state.mouseY + 'px';
@@ -305,6 +318,11 @@ export default class InputHandler {
             // read a crosshair that isn't actually pointed anywhere meaningful
             // (invisible, misaimed attacks reported during the walk).
             if (state.isBoardingBoat) return;
+
+            if (state.breachEquipped && this.engine.breachSystem) {
+                this.engine.breachSystem.beginAim();
+                return;
+            }
 
             const selectedType = this.getSelectedType();
 
@@ -345,6 +363,9 @@ export default class InputHandler {
 
         renderer.domElement.addEventListener('mouseup', (e) => {
             if (e.button !== 0) return;
+            if (state.breachEquipped && this.engine.breachSystem) {
+                this.engine.breachSystem.releaseAim(this.engine.world.camera);
+            }
             state.isChopping = false;
             state.isMining = false;
         });
@@ -698,7 +719,7 @@ export default class InputHandler {
         const crosshair = document.getElementById('crosshair');
         if (!crosshair) return;
         const isLocked = document.pointerLockElement === this.engine.world.renderer.domElement;
-        const show = isLocked && state.player.cameraMode === 'first';
+        const show = isLocked && state.player.cameraMode === 'first' && !state.breachEquipped;
         crosshair.style.display = show ? 'block' : 'none';
     }
 
@@ -884,3 +905,4 @@ export default class InputHandler {
         });
     }
 }
+

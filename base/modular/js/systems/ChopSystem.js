@@ -3,8 +3,8 @@
 // =====================================================
 
 import { CHOP_HITS, HIT_INTERVAL, CHOP_MAX_RANGE } from '../constants.js';
-import SphericalUtils from '../classes/SphericalUtils.js';
 import { smoothFactor } from '../classes/Easing.js';
+import SphericalUtils from '../classes/SphericalUtils.js';
 
 export default class ChopSystem {
     constructor(ui) {
@@ -50,14 +50,21 @@ export default class ChopSystem {
             }
         }
 
-        // Make the player face the tree while chopping
+        // Turn the locomotion frame toward the tree without rotating the entire
+        // planted-foot rig out from under itself.
         if (playerController && playerController.modelPivot) {
-            const faceDir = tree.position.clone().sub(state.player.pos).normalize();
+            const faceDir = tree.position.clone().sub(state.player.pos);
             const planet = playerController.getCurrentPlanet ? playerController.getCurrentPlanet() : null;
             if (planet) {
                 const normal = SphericalUtils.getSurfaceNormal(state.player.pos, planet);
-                const q = SphericalUtils.getOrientationOnSurface(normal, faceDir);
-                playerController.playerGroup.quaternion.slerp(q, smoothFactor(0.2, dt));
+                faceDir.projectOnPlane(normal).normalize();
+                const localX = faceDir.dot(playerController._surfaceRight);
+                const localZ = faceDir.dot(playerController._surfaceForward);
+                const target = Math.atan2(localX, localZ);
+                let delta = target - state.player.targetRotation;
+                while (delta > Math.PI) delta -= Math.PI * 2;
+                while (delta < -Math.PI) delta += Math.PI * 2;
+                state.player.targetRotation += delta * smoothFactor(0.16, dt);
             }
         }
 
@@ -134,3 +141,4 @@ export default class ChopSystem {
         }
     }
 }
+

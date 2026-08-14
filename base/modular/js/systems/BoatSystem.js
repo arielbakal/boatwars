@@ -5,27 +5,23 @@
 // Auto-leveled roll for a stable horizon. One consistent flight feel.
 // Chase camera + cockpit view toggle
 // =====================================================
+// Reusable temp vectors to reduce GC pressure
 
 import {
-    SHIP_MAX_SPEED, SHIP_ACCELERATION, SHIP_BRAKE, SHIP_TURN_SPEED,
-    SHIP_DRAG, SHIP_HEALTH,
-    SHIP_REVERSE_FACTOR, SHIP_MIN_SPEED, SHIP_COLLISION_RADIUS, SHIP_PROXIMITY_RANGE,
-    SHIP_DECK_Y_OFFSET, SHIP_PLAYER_Y_OFFSET,
-    SHIP_PITCH_SPEED, SHIP_YAW_SPEED,
-    SHIP_AUTO_LEVEL_SPEED,
-    SHIP_GRAVITY_STRENGTH, SHIP_GRAVITY_RANGE,
-    SHIP_TAKEOFF_SPEED, SHIP_TAKEOFF_ALTITUDE, SHIP_GROUND_REST_ALTITUDE,
-    SHIP_COLLISION_DAMAGE_THRESHOLD, SHIP_COLLISION_DAMAGE_AT_FULL_SPEED,
-    SHIP_DAMAGE_SPEED_HP_THRESHOLD, SHIP_DAMAGED_MIN_SPEED_MULT,
-    SHIP_REPAIR_GOLD_COST, SHIP_REPAIR_HEAL_AMOUNT,
-    BOARDING_WALK_SPEED, CAT_BOARDING_DELAY,
-    CAMERA_DISTANCE_BOAT, CAMERA_FOV, SHIP_FOV_KICK, FOV_KICK_LERP,
-    SHIP_BANK_MAX, SHIP_BANK_LERP
+    CAMERA_FOV, CAMERA_DISTANCE_BOAT, SHIP_MAX_SPEED, SHIP_ACCELERATION, SHIP_BRAKE,
+    SHIP_REVERSE_FACTOR, SHIP_DRAG, SHIP_MIN_SPEED, SHIP_COLLISION_RADIUS,
+    SHIP_PROXIMITY_RANGE, SHIP_DECK_Y_OFFSET, SHIP_PLAYER_Y_OFFSET, SHIP_PITCH_SPEED,
+    SHIP_YAW_SPEED, SHIP_HEALTH, SHIP_TURN_SPEED, SHIP_COLLISION_DAMAGE_THRESHOLD,
+    SHIP_COLLISION_DAMAGE_AT_FULL_SPEED, SHIP_DAMAGE_SPEED_HP_THRESHOLD,
+    SHIP_DAMAGED_MIN_SPEED_MULT, SHIP_REPAIR_GOLD_COST, SHIP_REPAIR_HEAL_AMOUNT,
+    SHIP_GRAVITY_STRENGTH, SHIP_GRAVITY_RANGE, SHIP_AUTO_LEVEL_SPEED, SHIP_BANK_MAX,
+    SHIP_BANK_LERP, SHIP_TAKEOFF_SPEED, SHIP_TAKEOFF_ALTITUDE,
+    SHIP_GROUND_REST_ALTITUDE, BOARDING_WALK_SPEED, CAT_BOARDING_DELAY, SHIP_FOV_KICK,
+    FOV_KICK_LERP
 } from '../constants.js';
-import SphericalUtils from '../classes/SphericalUtils.js';
 import { smoothFactor } from '../classes/Easing.js';
+import SphericalUtils from '../classes/SphericalUtils.js';
 
-// Reusable temp vectors to reduce GC pressure
 const _tmpVec = new THREE.Vector3();
 const _tmpVec2 = new THREE.Vector3();
 const _tmpVec3 = new THREE.Vector3();
@@ -35,7 +31,6 @@ const _tmpQuat = new THREE.Quaternion();
 const _tmpQuat2 = new THREE.Quaternion();
 const _tmpBankAxis = new THREE.Vector3(0, 0, 1); // ship-local forward/roll axis, never mutated
 const _tmpBankQuat = new THREE.Quaternion();
-
 export default class BoatSystem {
     constructor(ui) {
         this.ui = ui;
@@ -202,6 +197,7 @@ export default class BoatSystem {
 
     setSeatedPose(pc) {
         if (!pc.modelPivot) return;
+        if (pc.setSeated) { pc.setSeated(true); return; }
         if (pc.legL) { pc.legL.rotation.x = -Math.PI / 2; pc.legL.position.y = 0.3; }
         if (pc.legR) { pc.legR.rotation.x = -Math.PI / 2; pc.legR.position.y = 0.3; }
         if (pc.armL) { pc.armL.rotation.x = -0.4; pc.armL.rotation.z = 0.25; }
@@ -211,6 +207,7 @@ export default class BoatSystem {
 
     resetSeatedPose(pc) {
         if (!pc.modelPivot) return;
+        if (pc.setSeated) { pc.setSeated(false); return; }
         if (pc.legL) { pc.legL.rotation.x = 0; pc.legL.position.y = 0.4; }
         if (pc.legR) { pc.legR.rotation.x = 0; pc.legR.position.y = 0.4; }
         if (pc.armL) { pc.armL.rotation.set(0, 0, 0); }
@@ -301,11 +298,41 @@ export default class BoatSystem {
 
         state.catBoardingProgress = (state.catBoardingProgress || 0) + dt * BOARDING_WALK_SPEED;
         const t = Math.min(state.catBoardingProgress, 1);
-        cat.position.lerpVectors(state.catBoardingStartPos || cat.position, boat.position, t);
+        const start = state.catBoardingStartPos || cat.position;
+
+        // Run most of the route over the terrain, then make a readable hop onto
+        // the deck instead of linearly sliding through the ground and hull.
+        const planet = cat.userData.planet;
+        const runEnd = 0.72;
+        if (planet && t < runEnd) {
+            const u = t / runEnd;
+            const startN = SphericalUtils.getSurfaceNormal(start, planet);
+            const endN = SphericalUtils.getSurfaceNormal(boat.position, planet);
+            const normal = startN.clone().lerp(endN, u).normalize();
+            const terrain = SphericalUtils.sampleTerrainSurface(planet, normal, new THREE.Vector3(), new THREE.Vector3());
+            cat.position.copy(terrain.point).addScaledVector(terrain.normal, cat.userData.heightOffset || 0.018);
+            const tangent = boat.position.clone().sub(cat.position).projectOnPlane(terrain.normal).normalize();
+            if (tangent.lengthSq() > 1e-5) {
+                cat.userData.forwardWorld.copy(tangent);
+                cat.quaternion.slerp(SphericalUtils.getOrientationOnSurface(terrain.normal, tangent), smoothFactor(0.24, dt));
+            }
+        } else {
+            const u = THREE.MathUtils.clamp((t - runEnd) / (1 - runEnd), 0, 1);
+            const ease = u * u * (3 - 2 * u);
+            const deckLocal = new THREE.Vector3(0.3, SHIP_DECK_Y_OFFSET + 0.28, 0.5).applyQuaternion(boat.quaternion);
+            const target = boat.position.clone().add(deckLocal);
+            if (!state.catBoardingHopStart) state.catBoardingHopStart = cat.position.clone();
+            cat.position.lerpVectors(state.catBoardingHopStart, target, ease);
+            const shipUp = new THREE.Vector3(0, 1, 0).applyQuaternion(boat.quaternion).normalize();
+            cat.position.addScaledVector(shipUp, Math.sin(u * Math.PI) * 0.42);
+            cat.quaternion.slerp(boat.quaternion, smoothFactor(0.18, dt));
+        }
 
         if (t >= 1) {
             state.catBoarding = false;
             state.catOnBoat = true;
+            cat.userData.speed = 0;
+            state.catBoardingHopStart = null;
         }
     }
 
@@ -942,3 +969,4 @@ export default class BoatSystem {
         }
     }
 }
+
