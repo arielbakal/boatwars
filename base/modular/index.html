@@ -4,18 +4,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Island Survival</title>
+    <title>Terrarium Breach: Solar System</title>
     <script src="https://cdn.jsdelivr.net/npm/beepbox@4.2.0/global/beepbox_synth.min.js"></script>
     <link rel="stylesheet" href="css/style.css">
 </head>
 
 <body>
+
     <div id="custom-cursor"></div>
     <div id="touch-reticle"></div>
     <div id="crosshair"></div>
+    <div id="breach-crosshair"></div>
     <div id="white-flash"></div>
+    <div id="visual-grade"></div>
+    <div id="speed-lines"></div>
+    <div id="paper-grain"></div>
 
     <div id="ui-layer">
+
+        <div id="breach-hud">
+            <div class="breach-topline"><span id="breach-planet">STARTING PLANET</span><span id="breach-mode">HOLSTERED</span></div>
+            <div class="breach-row"><span>SYSTEM BLIGHT</span><strong id="breach-remaining">0 / 0</strong></div>
+            <div class="breach-row"><span>WORLD STABILITY</span><strong id="breach-stability">—</strong></div>
+            <div id="breach-stability-track"><div id="breach-stability-fill"></div></div>
+            <div id="breach-objective">INITIALIZING SOLAR ECOLOGY</div>
+        </div>
+        <div id="breach-toast"></div>
         <button id="settings-btn">⚙️</button>
         <div id="settings-popup">
             <label>
@@ -24,6 +38,12 @@
                     <input type="range" id="vol-slider" min="0" max="100" value="50">
                 </div>
             </label>
+            <div class="setting-row">
+                <span>PIXEL</span>
+                <div id="pixel-slider-container">
+                    <input type="range" id="pixel-slider" min="0" max="100" value="8">
+                </div>
+            </div>
         </div>
         <div id="dialog-box">
             <p id="dialog-text">Greetings, traveler!</p>
@@ -35,7 +55,7 @@
         </div>
         <div id="craft-hint"
             style="display:none;position:absolute;bottom:200px;left:50%;transform:translateX(-50%);color:#fff;background:rgba(0,0,0,0.6);padding:8px 16px;border-radius:4px;font-family:sans-serif;font-size:14px;">
-            Place 4 logs close together to build a spaceship
+            Your spacecraft crashed nearby. Gather accessible tools and repair it.
         </div>
         <div id="repair-hint"
             style="display:none;position:absolute;bottom:240px;left:50%;transform:translateX(-50%);color:#fff;background:rgba(0,0,0,0.6);padding:8px 16px;border-radius:4px;font-family:sans-serif;font-size:14px;">
@@ -65,8 +85,8 @@
             <span class="text">NEW WORLD</span>
             <span class="skull">☠</span>
         </button>
-        <div id="boat-prompt">Press E to Board Ship</div>
-        <div id="boat-nav-hint">W/S Thrust &bull; A/D Yaw &bull; &uarr;/&darr; or R/F Pitch &bull; C Cockpit &bull; E Disembark</div>
+        <div id="boat-prompt">Press E to Board Interplanetary Ship</div>
+        <div id="boat-nav-hint">W thrust · mouse steers while moving · release W to free-look · E exit</div>
         <div id="boat-stats"
             style="display:none; position:absolute; bottom:20px; right:20px; color:white; background:rgba(0,0,0,0.5); padding:10px; border-radius:5px; font-family:monospace;">
             <div>Speed: <span id="boat-speed-val">0</span></div>
@@ -77,7 +97,7 @@
         <div id="island-indicator"></div>
 
         <!-- Multiplayer Panel -->
-        <div id="mp-panel">
+        <div id="mp-panel" style="display:none;">
             <div id="mp-header">MULTIPLAYER</div>
             <div id="mp-status">Offline</div>
             <input type="text" id="mp-url" placeholder="ws://host:port">
@@ -118,6 +138,7 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script type="module" src="js/main.js"></script>
+
 </body>
 
 </html>
