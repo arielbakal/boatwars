@@ -1,619 +1,416 @@
 // =====================================================
-// PLAYER CONTROLLER - Spherical Planet Movement + Camera
+// PLAYER CONTROLLER - weighted spherical movement, procedural IK and camera
 // =====================================================
 
 import {
-    CAMERA_MIN_Y, CAMERA_MAX_Y, CAMERA_DISTANCE, CAMERA_LERP, CAMERA_FOV,
-    CAMERA_FOV_FIRST_PERSON,
-    GRAVITY, JUMP_FORCE, PLAYER_RADIUS, PLAYER_SURFACE_HEIGHT,
-    GRAVITY_REFERENCE_RADIUS, MAX_FALL_SPEED, ON_GROUND_THRESHOLD,
-    FRICTION_GROUND, FRICTION_STUN, ATTACK_SWING_DURATION,
-    PLAYER_FOV_KICK, FOV_KICK_LERP, PLAYER_SPEED_BOOST_CAP
+    GRAVITY, JUMP_FORCE, PLAYER_RADIUS, PLAYER_SURFACE_HEIGHT, GRAVITY_REFERENCE_RADIUS,
+    MAX_FALL_SPEED, CAMERA_FOV, CAMERA_FOV_FIRST_PERSON, CAMERA_DISTANCE, CAMERA_MAX_Y,
+    PLAYER_SPEED_BOOST_CAP, PLAYER_FOV_KICK
 } from '../constants.js';
 import SphericalUtils from './SphericalUtils.js';
-import { easeInOutQuad, smoothFactor } from './Easing.js';
+import { getProceduralRig } from './ProceduralRig.js';
 
-// --- Held-tool grip (Minecraft-like) ---
-// Axe/pickaxe handle geometry (EntityFactory.createAxe/createPickaxe) is a cylinder of
-// height 0.5 centered on the group origin, running along local +Y, with the head/blade
-// at the +Y tip. HELD_TOOL_TILT rotates that local Y axis toward local +Z (forward) by
-// this many radians so the head sits up-and-forward from the grip; the same rotation
-// carries local +Z (the axe blade's face) to (0, -sin, cos) — forward and angled slightly
-// down, edge-first — because a rotation preserves the 90 deg between the two axes.
-const HELD_TOOL_TILT = Math.PI / 5; // 36 deg forward from vertical (within the 30-45 deg range)
-const HELD_TOOL_HALF_HANDLE = 0.25; // half of the 0.5-long handle cylinder
-
+const PLAYER_EPS = 1e-6;
+const HELD_TOOL_TILT = Math.PI / 5;
+const HELD_TOOL_HALF_HANDLE = 0.25;
+const playerClamp = THREE.MathUtils.clamp;
+const playerExpAlpha = (rate, dt) => 1 - Math.exp(-rate * dt);
 export default class PlayerController {
     constructor(world, state) {
         this.world = world;
         this.state = state;
         this.playerGroup = null;
         this.modelPivot = null;
+        this.rig = null;
         this.legL = null;
         this.legR = null;
         this.armL = null;
         this.armR = null;
-        this.time = 0;
-        this._isMoving = false; // last-frame movement state, read by updateCamera()'s FOV kick
-        this._walkPhase = 0; // dedicated walk-cycle phase accumulator (speed-scaled, see update())
+        this.handAnchorL = null;
+        this.handAnchorR = null;
+        this.heldItem = null;
         this.chopAnimState = null;
-        this._lookTarget = null; // C8: smoothed camera look target
-
-        // Spherical world state
-        this._surfaceNormal = new THREE.Vector3(0, 1, 0); // Current "up" direction
-        this._surfaceForward = new THREE.Vector3(0, 0, 1); // Current tangent forward
-        this._surfaceRight = new THREE.Vector3(1, 0, 0); // Current tangent right
+        this.time = 0;
+        this._isMoving = false;
+        this._lookTarget = null;
+        this._prevCamPlayerPos = null;
+        this._surfaceNormal = new THREE.Vector3(0, 1, 0);
+        this._groundNormal = new THREE.Vector3(0, 1, 0);
+        this._surfaceForward = new THREE.Vector3(0, 0, 1);
+        this._surfaceRight = new THREE.Vector3(1, 0, 0);
         this._currentPlanet = null;
+        this._previousTangentVelocity = new THREE.Vector3();
+        this.accelerationVector = new THREE.Vector3();
+        this._jumpBuffer = 0;
+        this._coyoteTimer = 0;
+        this._spaceWasDown = false;
+        this._runAmount = 0;
+        this._landingKick = 0;
+        this._cameraRecoil = 0;
+        this._cameraDistance = CAMERA_DISTANCE;
+        this.weaponRecoil = 0;
+        this.breachCharge = 0;
+        this._lastGrounded = false;
+        this._tmp = new THREE.Vector3();
+        this._tmp2 = new THREE.Vector3();
+        this._tmp3 = new THREE.Vector3();
+        this._cameraRaycaster = new THREE.Raycaster();
+        this.audio = null;
+        this.footprints = [];
+        this._footprintGeometry = new THREE.CircleGeometry(0.17, 14);
+        this._footprintBasis = new THREE.Matrix4();
     }
 
     createModel(palette) {
         this.playerGroup = new THREE.Group();
+        this.playerGroup.name = 'Local planetary player';
         this.modelPivot = new THREE.Group();
-        this.modelPivot.scale.setScalar(0.6);
+        this.modelPivot.name = 'Procedural body root';
         this.playerGroup.add(this.modelPivot);
 
-        const matBody = this.world.getMat(palette.creature);
-        const matLimb = this.world.getMat(palette.flora);
-        const matEye = new THREE.MeshBasicMaterial({ color: 0xffffff });
-        const matPupil = new THREE.MeshBasicMaterial({ color: 0x000000 });
-
-        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.3), matBody);
-        torso.position.y = 0.7;
-        this.modelPivot.add(torso);
-        this.torso = torso;
-
-        const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.35, 0.4), matLimb);
-        head.position.y = 1.2;
-        this.modelPivot.add(head);
-        this.head = head;
-
-        const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.05), matEye);
-        eyeL.position.set(0.12, 1.2, 0.2);
-        const eyeR = eyeL.clone();
-        eyeR.position.set(-0.12, 1.2, 0.2);
-        const pupilGeo = new THREE.BoxGeometry(0.04, 0.04, 0.06);
-        const pupilL = new THREE.Mesh(pupilGeo, matPupil);
-        pupilL.position.z = 0.01;
-        const pupilR = pupilL.clone();
-        eyeL.add(pupilL);
-        eyeR.add(pupilR);
-        this.modelPivot.add(eyeL, eyeR);
-        this.eyeL = eyeL;
-        this.eyeR = eyeR;
-
-        const legGeo = new THREE.BoxGeometry(0.15, 0.4, 0.15);
-        legGeo.translate(0, -0.2, 0);
-        this.legL = new THREE.Mesh(legGeo, matLimb);
-        this.legL.position.set(0.15, 0.4, 0);
-        this.legR = new THREE.Mesh(legGeo, matLimb);
-        this.legR.position.set(-0.15, 0.4, 0);
-        this.modelPivot.add(this.legL, this.legR);
-
-        const armGeo = new THREE.BoxGeometry(0.12, 0.4, 0.12);
-        armGeo.translate(0, -0.2, 0);
-        this.armL = new THREE.Mesh(armGeo, matLimb);
-        this.armL.position.set(0.35, 0.9, 0);
-        this.armR = new THREE.Mesh(armGeo, matLimb);
-        this.armR.position.set(-0.35, 0.9, 0);
-        this.modelPivot.add(this.armL, this.armR);
-
-        this.handAnchorL = new THREE.Group();
-        this.handAnchorL.position.set(0, -0.4, 0);
-        this.armL.add(this.handAnchorL);
-
-        this.handAnchorR = new THREE.Group();
-        this.handAnchorR.position.set(0, -0.4, 0);
-        this.armR.add(this.handAnchorR);
-
-        this.heldItem = null;
+        const ProceduralRig = getProceduralRig();
+        this.rig = new ProceduralRig(this, palette);
+        this.legL = this.rig.leftFootMesh;
+        this.legR = this.rig.rightFootMesh;
+        this.armL = this.rig.armProxyL;
+        this.armR = this.rig.armProxyR;
+        this.handAnchorL = this.rig.handAnchorL;
+        this.handAnchorR = this.rig.handAnchorR;
+        this.torso = this.rig.chestMesh;
+        this.head = this.rig.headMesh;
+        this.eyeL = this.rig.eyeL;
+        this.eyeR = this.rig.eyeR;
         this.world.add(this.playerGroup);
     }
 
-    /**
-     * Toggle visibility of the local player's body (torso, head, eyes, legs, left arm)
-     * WITHOUT touching the right arm — armR (and whatever it's holding, via
-     * handAnchorR) stays visible so a held tool reads Minecraft-style in first person
-     * and its swing animation (armR.rotation.x, driven elsewhere) stays legible.
-     * modelPivot itself is intentionally left alone here: it's still used as a single
-     * on/off switch for the invincibility flash, which should blink the whole local
-     * player (arm included) in either camera mode.
-     */
     setBodyVisible(visible) {
-        if (this.torso) this.torso.visible = visible;
-        if (this.head) this.head.visible = visible;
-        if (this.eyeL) this.eyeL.visible = visible;
-        if (this.eyeR) this.eyeR.visible = visible;
-        if (this.legL) this.legL.visible = visible;
-        if (this.legR) this.legR.visible = visible;
-        if (this.armL) this.armL.visible = visible;
+        if (this.rig) this.rig.setVisible(visible);
     }
 
     holdItem(item) {
-        if (this.heldItem) {
-            this.handAnchorR.remove(this.heldItem);
-        }
+        if (!this.handAnchorR) return;
+        if (this.heldItem && this.heldItem.parent === this.handAnchorR) this.handAnchorR.remove(this.heldItem);
         this.heldItem = item;
-        if (item) {
-            const isHandledTool = item.userData && (item.userData.type === 'axe' || item.userData.type === 'pickaxe');
-            if (isHandledTool) {
-                // Minecraft-like grip: gripped near the handle's LOWER end, head/blade at
-                // the top, handle tilted forward from vertical, blade facing the player's
-                // forward direction. A single rotation about the anchor's local X axis
-                // does this (see HELD_TOOL_TILT comment above) — no yaw/roll needed since
-                // the hand anchor's own axes already match the character's facing.
-                item.rotation.set(HELD_TOOL_TILT, 0, 0);
-                // Move the grip point (local -Y tip of the handle, scaled to match the
-                // tool's held-size scale-up in InputHandler) to the anchor's origin, so
-                // the hand holds the BASE of the handle instead of its midpoint.
-                const halfHandle = HELD_TOOL_HALF_HANDLE * (item.scale.y || 1);
-                item.position.set(
-                    0,
-                    halfHandle * Math.cos(HELD_TOOL_TILT),
-                    halfHandle * Math.sin(HELD_TOOL_TILT)
-                );
-            } else {
-                item.rotation.set(0, 0, 0);
-                item.position.set(0, 0, 0);
-            }
-            this.handAnchorR.add(item);
+        if (!item) return;
+
+        const isHandledTool = item.userData && (item.userData.type === 'axe' || item.userData.type === 'pickaxe');
+        if (isHandledTool) {
+            item.rotation.set(HELD_TOOL_TILT, 0, 0);
+            const halfHandle = HELD_TOOL_HALF_HANDLE * (item.scale.y || 1);
+            item.position.set(0, halfHandle * Math.cos(HELD_TOOL_TILT), halfHandle * Math.sin(HELD_TOOL_TILT));
+        } else {
+            item.rotation.set(0, 0, 0);
+            item.position.set(0, 0, 0);
         }
+        this.handAnchorR.add(item);
     }
 
-    /**
-     * Compute surface frame (normal, forward, right) for the nearest planet.
-     */
     _updateSurfaceFrame(planets) {
-        const player = this.state.player;
-        const result = SphericalUtils.findNearestPlanet(player.pos, planets);
+        const result = SphericalUtils.findNearestPlanet(this.state.player.pos, planets);
         if (!result) return;
-
         this._currentPlanet = result.planet;
-        this._surfaceNormal = SphericalUtils.getSurfaceNormal(player.pos, result.planet);
+        const nextUp = SphericalUtils.getSurfaceNormal(this.state.player.pos, result.planet);
+        this._surfaceNormal.lerp(nextUp, 0.72).normalize();
 
-        // Maintain a consistent forward by projecting the old forward onto the new tangent plane
-        let fwd = this._surfaceForward.clone();
-        fwd.sub(this._surfaceNormal.clone().multiplyScalar(fwd.dot(this._surfaceNormal)));
-        if (fwd.lengthSq() < 0.0001) {
-            fwd = SphericalUtils._getArbitraryTangent(this._surfaceNormal);
-        } else {
-            fwd.normalize();
-        }
-        this._surfaceForward = fwd;
-        this._surfaceRight = new THREE.Vector3().crossVectors(this._surfaceNormal, this._surfaceForward).normalize();
-        // Re-orthogonalize
-        this._surfaceForward = new THREE.Vector3().crossVectors(this._surfaceRight, this._surfaceNormal).normalize();
+        let fwd = this._surfaceForward.clone().projectOnPlane(this._surfaceNormal);
+        if (fwd.lengthSq() < 0.0001) fwd = SphericalUtils._getArbitraryTangent(this._surfaceNormal);
+        else fwd.normalize();
+        this._surfaceRight.crossVectors(this._surfaceNormal, fwd).normalize();
+        this._surfaceForward.crossVectors(this._surfaceRight, this._surfaceNormal).normalize();
+    }
+
+    _terrainSurfaceAt(position, planet) {
+        const radial = position.clone().sub(planet.center).normalize();
+        const sample = SphericalUtils.sampleTerrainSurface(planet, radial, new THREE.Vector3(), new THREE.Vector3());
+        return { radial, point: sample.point, normal: sample.normal, radius: sample.radius };
     }
 
     update(dt, islands) {
-        if (!this.playerGroup) return;
-        if (this.state.isDead) return;
+        if (!this.playerGroup || this.state.isDead) return;
         const state = this.state;
         const player = state.player;
         this.time += dt;
-
-        // Update surface frame based on nearest planet
+        const frameScale = playerClamp(dt * 60, 0.25, 2.2);
         this._updateSurfaceFrame(islands);
-
         if (!this._currentPlanet) return;
         const planet = this._currentPlanet;
         const up = this._surfaceNormal;
-        const altitude = SphericalUtils.getAltitude(player.pos, planet);
+        const wasGrounded = !!player.onGround;
+        this._lastGrounded = wasGrounded;
 
-        // --- Camera-relative movement on the sphere surface ---
-        const camera = this.world.camera;
-        const ca = player.cameraAngle;
+        const jumpPressed = state.inputs.space && !this._spaceWasDown;
+        this._spaceWasDown = !!state.inputs.space;
+        if (jumpPressed) this._jumpBuffer = 0.15;
+        else this._jumpBuffer = Math.max(0, this._jumpBuffer - dt);
+        if (wasGrounded) this._coyoteTimer = 0.13;
+        else this._coyoteTimer = Math.max(0, this._coyoteTimer - dt);
 
-        // Compute camera forward/right projected onto the tangent plane
-        const camWorldFwd = new THREE.Vector3();
-        camera.getWorldDirection(camWorldFwd);
-        // Project onto tangent plane
-        let camFwd = camWorldFwd.clone().sub(up.clone().multiplyScalar(camWorldFwd.dot(up)));
-        if (camFwd.lengthSq() < 0.001) {
-            camFwd = this._surfaceForward.clone();
-        } else {
-            camFwd.normalize();
-        }
-        const camRight = new THREE.Vector3().crossVectors(up, camFwd).negate().normalize();
+        // Camera-relative tangent movement. The target velocity is approached rather
+        // than assigned, giving the character weight without sacrificing response.
+        const cameraForwardWorld = new THREE.Vector3();
+        this.world.camera.getWorldDirection(cameraForwardWorld);
+        let camFwd = cameraForwardWorld.clone().projectOnPlane(up);
+        if (camFwd.lengthSq() < 0.001) camFwd.copy(this._surfaceForward);
+        else camFwd.normalize();
+        const camRight = new THREE.Vector3().crossVectors(camFwd, up).normalize();
+        const moveDir = new THREE.Vector3();
+        if (state.inputs.w) moveDir.add(camFwd);
+        if (state.inputs.s) moveDir.sub(camFwd);
+        if (state.inputs.a) moveDir.sub(camRight);
+        if (state.inputs.d) moveDir.add(camRight);
+        const hasInput = moveDir.lengthSq() > 0.01;
+        if (hasInput) moveDir.normalize();
 
-        // Build movement direction on tangent plane
-        const moveDir = new THREE.Vector3(0, 0, 0);
-        let isMoving = false;
+        this._runAmount = playerClamp(this._runAmount + (state.inputs.shift && hasInput ? 1 : -1) * dt * 5.5, 0, 1);
+        const baseSpeed = player.speed + (player.speedBoost || 0);
+        const targetSpeed = baseSpeed * THREE.MathUtils.lerp(1, 1.58, this._runAmount);
+        const radialVelocity = up.clone().multiplyScalar(player.vel.dot(up));
+        const tangentVelocity = player.vel.clone().sub(radialVelocity);
+        const targetTangent = hasInput ? moveDir.clone().multiplyScalar(targetSpeed) : new THREE.Vector3();
+        const response = player.stunTimer > 0 ? 4.2 : (hasInput ? 13.5 : 18.5);
+        tangentVelocity.lerp(targetTangent, playerExpAlpha(response, dt));
+        if (player.stunTimer > 0) player.stunTimer = Math.max(0, player.stunTimer - dt);
+        player.vel.copy(tangentVelocity).add(radialVelocity);
 
-        if (player.stunTimer > 0) {
-            player.stunTimer -= dt;
-            // Apply friction to velocity (in world space, tangential component)
-            const velTangent = player.vel.clone().sub(up.clone().multiplyScalar(player.vel.dot(up)));
-            velTangent.multiplyScalar(FRICTION_STUN);
-            const velNormal = up.clone().multiplyScalar(player.vel.dot(up));
-            player.vel.copy(velTangent.add(velNormal));
-        } else {
-            if (state.inputs.w) moveDir.add(camFwd);
-            if (state.inputs.s) moveDir.sub(camFwd);
-            if (state.inputs.a) moveDir.sub(camRight);
-            if (state.inputs.d) moveDir.add(camRight);
-
-            if (moveDir.lengthSq() > 0.01) {
-                isMoving = true;
-                moveDir.normalize();
-
-                const effectiveSpeed = player.speed + (player.speedBoost || 0);
-                // Set tangential velocity, preserve radial component
-                const velNormalComp = up.clone().multiplyScalar(player.vel.dot(up));
-                player.vel.copy(moveDir.multiplyScalar(effectiveSpeed).add(velNormalComp));
-
-                // Compute target rotation relative to surface frame.
-                // Skipped in first person: updateCamera() drives targetRotation from
-                // camera yaw there every frame (so the arm/melee arc track the
-                // crosshair), and blending toward the movement direction here would
-                // just fight that each frame, showing up as arm wobble while strafing.
-                if (player.cameraMode !== 'first') {
-                    const localX = moveDir.dot(this._surfaceRight);
-                    const localZ = moveDir.dot(this._surfaceForward);
-                    const targetAngle = Math.atan2(localX, localZ);
-
-                    let angleDiff = targetAngle - player.targetRotation;
-                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                    player.targetRotation += angleDiff * smoothFactor(0.2, dt);
-                }
-            } else {
-                // Apply friction to tangential velocity
-                const velNormal = up.clone().multiplyScalar(player.vel.dot(up));
-                const velTangent = player.vel.clone().sub(velNormal);
-                velTangent.multiplyScalar(FRICTION_GROUND);
-                player.vel.copy(velTangent.add(velNormal));
-            }
+        this._isMoving = hasInput && tangentVelocity.length() > baseSpeed * 0.08;
+        if (hasInput && player.cameraMode !== 'first') {
+            const localX = moveDir.dot(this._surfaceRight);
+            const localZ = moveDir.dot(this._surfaceForward);
+            const targetAngle = Math.atan2(localX, localZ);
+            let delta = targetAngle - player.targetRotation;
+            while (delta > Math.PI) delta -= Math.PI * 2;
+            while (delta < -Math.PI) delta += Math.PI * 2;
+            player.targetRotation += delta * playerExpAlpha(player.onGround ? 14 : 7, dt);
         }
 
-        // Gravity: scale by planet radius (larger planet = stronger gravity)
-        const gravityStrength = GRAVITY * (planet.radius / GRAVITY_REFERENCE_RADIUS);
-        const gravityAccel = up.clone().multiplyScalar(-gravityStrength);
-        player.vel.add(gravityAccel);
+        this.accelerationVector.copy(tangentVelocity).sub(this._previousTangentVelocity).divideScalar(Math.max(dt, 0.004));
+        this._previousTangentVelocity.copy(tangentVelocity);
 
-        // Terminal velocity cap (prevent infinite fall speed)
+        // Frame-rate compensated radial gravity.
+        const gravityStrength = GRAVITY * (planet.radius / GRAVITY_REFERENCE_RADIUS) * frameScale;
+        player.vel.addScaledVector(up, -gravityStrength);
         const radialSpeed = player.vel.dot(up);
-        if (radialSpeed < -MAX_FALL_SPEED) {
-            player.vel.sub(up.clone().multiplyScalar(radialSpeed + MAX_FALL_SPEED));
-        }
+        if (radialSpeed < -MAX_FALL_SPEED) player.vel.addScaledVector(up, -MAX_FALL_SPEED - radialSpeed);
 
-        // Apply velocity
-        const nextPos = player.pos.clone().add(player.vel);
-
-        // Ground collision: check distance from planet center
+        const nextPos = player.pos.clone().addScaledVector(player.vel, frameScale);
+        player.onGround = false;
+        const terrain = this._terrainSurfaceAt(nextPos, planet);
         const distFromCenter = nextPos.distanceTo(planet.center);
-        const surfaceDist = distFromCenter - planet.radius;
-
-        let onAnyIsland = false;
-
-        // Check if within planet's gravity well (radius * 2)
-        if (distFromCenter < planet.radius * 2) {
-            // Ground collision
-            if (surfaceDist < PLAYER_SURFACE_HEIGHT) {
-                // Snap to surface
-                const normal = nextPos.clone().sub(planet.center).normalize();
-                nextPos.copy(planet.center).add(normal.multiplyScalar(planet.radius + PLAYER_SURFACE_HEIGHT));
-                // Zero out velocity component toward planet center
-                const velDotUp = player.vel.dot(up);
-                if (velDotUp < 0) {
-                    player.vel.sub(up.clone().multiplyScalar(velDotUp));
-                }
-                player.onGround = true;
-                onAnyIsland = true;
-            }
+        const minSurface = terrain.radius + PLAYER_SURFACE_HEIGHT;
+        if (distFromCenter < planet.radius * 2.4 && distFromCenter < minSurface) {
+            nextPos.copy(planet.center).addScaledVector(terrain.radial, minSurface);
+            const vn = player.vel.dot(terrain.normal);
+            if (vn < 0) player.vel.addScaledVector(terrain.normal, -vn);
+            this._groundNormal.lerp(terrain.normal, 0.82).normalize();
+            player.onGround = true;
+        } else {
+            this._groundNormal.lerp(up, playerExpAlpha(8, dt)).normalize();
         }
 
-        // Fallback: if too far from any planet, respawn on nearest planet
-        if (!onAnyIsland && surfaceDist > 100) {
+        // Respawn only when genuinely lost in deep space on foot.
+        if (distFromCenter - planet.radius > 100) {
             const nearest = SphericalUtils.findNearestPlanet(nextPos, islands);
-            const spawn = nearest ? nearest.planet : islands[0];
-            const spawnNormal = nextPos.clone().sub(spawn.center).normalize();
-            if (spawnNormal.lengthSq() < 0.001) spawnNormal.set(0, 1, 0);
-            nextPos.copy(spawn.center).add(spawnNormal.multiplyScalar(spawn.radius + 3));
+            const spawn = nearest?.planet || islands[0];
+            const normal = nextPos.clone().sub(spawn.center).normalize();
+            if (normal.lengthSq() < PLAYER_EPS) normal.set(0, 1, 0);
+            const radius = SphericalUtils.sampleTerrainHeight(spawn, normal);
+            nextPos.copy(spawn.center).addScaledVector(normal, radius + 1.2);
             player.vel.set(0, 0, 0);
-            onAnyIsland = true;
         }
-
         player.pos.copy(nextPos);
 
-        // --- Obstacle Collision ---
+        // Obstacle collision remains spherical/world-space but now damps the
+        // incoming tangent velocity instead of allowing jitter against the collider.
         let groundHeightOverride = null;
-
         for (const obs of state.obstacles) {
             if (obs.userData.isMountain) {
                 const dist3D = player.pos.distanceTo(obs.position);
                 const maxR = obs.userData.mountRadius;
                 if (dist3D < maxR) {
                     const surfNorm = SphericalUtils.getSurfaceNormal(obs.position, planet);
-                    const obsSurfacePos = planet.center.clone().add(surfNorm.clone().multiplyScalar(planet.radius));
-                    // Distance along surface approximation
-                    const arcDist = player.pos.distanceTo(obsSurfacePos);
+                    const obsSurface = planet.center.clone().addScaledVector(surfNorm, planet.radius);
+                    const arcDist = player.pos.distanceTo(obsSurface);
                     if (arcDist < maxR) {
                         const h = obs.userData.mountHeight * (1 - arcDist / maxR);
-                        const climbAlt = planet.radius + h;
-                        const currentAlt = player.pos.distanceTo(planet.center);
-                        if (currentAlt < climbAlt + 1.0) {
-                            groundHeightOverride = climbAlt;
-                        }
+                        groundHeightOverride = Math.max(groundHeightOverride || 0, planet.radius + h);
                     }
                 }
                 continue;
             }
-
             if (!obs.userData.radius) continue;
-            const dist = player.pos.distanceTo(obs.position);
-            const minDist = PLAYER_RADIUS + obs.userData.radius;
-            if (dist < minDist && dist > 0.001) {
-                const pushDir = player.pos.clone().sub(obs.position).normalize();
-                const overlap = minDist - dist;
-                player.pos.add(pushDir.multiplyScalar(overlap));
+            const distance = player.pos.distanceTo(obs.position);
+            const minDistance = PLAYER_RADIUS + obs.userData.radius;
+            if (distance < minDistance && distance > PLAYER_EPS) {
+                const push = player.pos.clone().sub(obs.position).normalize();
+                player.pos.addScaledVector(push, minDistance - distance);
+                const into = player.vel.dot(push);
+                if (into < 0) player.vel.addScaledVector(push, -into * 0.86);
             }
         }
 
-        // Apply mountain height override
         if (groundHeightOverride !== null) {
-            const currentDist = player.pos.distanceTo(planet.center);
-            if (currentDist < groundHeightOverride + 0.5) {
-                const normal = player.pos.clone().sub(planet.center).normalize();
-                player.pos.copy(planet.center).add(normal.multiplyScalar(groundHeightOverride));
-                // Zero radial velocity
-                const velDotUp2 = player.vel.dot(normal);
-                if (velDotUp2 < 0) {
-                    player.vel.sub(normal.clone().multiplyScalar(velDotUp2));
-                }
+            const normal = player.pos.clone().sub(planet.center).normalize();
+            if (player.pos.distanceTo(planet.center) < groundHeightOverride + PLAYER_SURFACE_HEIGHT) {
+                player.pos.copy(planet.center).addScaledVector(normal, groundHeightOverride + PLAYER_SURFACE_HEIGHT);
+                const vn = player.vel.dot(normal);
+                if (vn < 0) player.vel.addScaledVector(normal, -vn);
+                this._groundNormal.lerp(normal, 0.8).normalize();
                 player.onGround = true;
-                this.playerGroup.position.copy(player.pos);
             }
         }
 
-        // Jump - along surface normal
-        if (player.onGround && state.inputs.space) {
-            player.vel.add(up.clone().multiplyScalar(JUMP_FORCE));
+        // Buffered jump + coyote time. A held Space key cannot repeatedly jump.
+        if (this._jumpBuffer > 0 && (player.onGround || this._coyoteTimer > 0)) {
+            const jumpUp = SphericalUtils.getSurfaceNormal(player.pos, planet);
+            const currentRadial = player.vel.dot(jumpUp);
+            player.vel.addScaledVector(jumpUp, JUMP_FORCE - currentRadial);
+            player.pos.addScaledVector(jumpUp, 0.025);
             player.onGround = false;
+            this._jumpBuffer = 0;
+            this._coyoteTimer = 0;
         }
 
-        // Only lose onGround when actually falling with meaningful downward speed
-        if (player.onGround && player.vel.dot(up) < -ON_GROUND_THRESHOLD) {
-            player.onGround = false;
-        }
-
-        // --- Update mesh position ---
         this.playerGroup.position.copy(player.pos);
+        const trueNormal = SphericalUtils.getSurfaceNormal(player.pos, planet);
+        const orientQ = SphericalUtils.getOrientationOnSurface(trueNormal, this._surfaceForward);
+        this.playerGroup.quaternion.slerp(orientQ, playerExpAlpha(18, dt));
+        // Lower-body yaw is solved inside ProceduralRig; keeping the body root at
+        // identity lets planted world-space feet remain planted while turning.
+        this.modelPivot.quaternion.slerp(new THREE.Quaternion(), playerExpAlpha(16, dt));
 
-        // --- Orient player group: align Y-up with surface normal only ---
-        // Use a stable surface frame reference (NOT targetRotation) to avoid double rotation
-        const surfNormal = SphericalUtils.getSurfaceNormal(player.pos, planet);
-        const orientQ = SphericalUtils.getOrientationOnSurface(surfNormal, this._surfaceForward);
-        this.playerGroup.quaternion.slerp(orientQ, smoothFactor(0.15, dt));
+        this.weaponRecoil = THREE.MathUtils.lerp(this.weaponRecoil, 0, playerExpAlpha(12, dt));
+        this._cameraRecoil = THREE.MathUtils.lerp(this._cameraRecoil, 0, playerExpAlpha(9, dt));
+        this._landingKick = THREE.MathUtils.lerp(this._landingKick, 0, playerExpAlpha(10, dt));
+        if (this.rig) this.rig.update(dt);
+        this._updateFootprints(dt);
 
-        // --- Model pivot rotation: facing direction within the playerGroup's local frame ---
-        // targetRotation is the angle relative to _surfaceForward, which matches
-        // the playerGroup's local Z axis, so a local Y rotation by targetRotation is correct.
-        const targetQ = new THREE.Quaternion();
-        targetQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), player.targetRotation);
-        this.modelPivot.quaternion.slerp(targetQ, smoothFactor(isMoving ? 0.2 : 0.1, dt));
-
-        // --- Invincibility flash ---
-        if (state.invincibleTimer > 0 && this.modelPivot) {
-            this.modelPivot.visible = Math.sin(state.invincibleTimer * 16) > 0;
-        } else if (this.modelPivot && !this.modelPivot.visible) {
-            // Per-part visibility (torso/head/etc. vs the always-visible right arm) is
-            // handled by setBodyVisible() in updateCamera() each frame — modelPivot
-            // itself just needs to come back on after a flash, in either camera mode.
+        // Invincibility reads as a material/body pulse but does not interrupt IK.
+        if (state.invincibleTimer > 0) {
+            this.modelPivot.visible = Math.sin(state.invincibleTimer * 20) > -0.25;
+        } else {
             this.modelPivot.visible = true;
         }
+    }
 
-        // --- Procedural animation ---
-        this._isMoving = isMoving; // read by updateCamera()'s on-foot FOV kick
+    setSeated(active) {
+        this.rig?.setSeated?.(active);
+    }
 
-        // In first person the hanging rest/walk arm poses put the always-visible
-        // right arm below the camera frustum, so it holds the tool-ready pose
-        // (-1.2, the chop rest angle) instead — Minecraft-style.
-        const fpArmRaised = player.cameraMode === 'first';
+    addWeaponRecoil(amount = 1) {
+        this.weaponRecoil = Math.max(this.weaponRecoil, amount);
+        this._cameraRecoil = Math.max(this._cameraRecoil, 0.08 + amount * 0.055);
+    }
 
-        if (state.isAttacking) {
-            const swingT = (state._attackVisualTimer || 0) / ATTACK_SWING_DURATION;
-            let armAngleR, armAngleL;
-            // C5: ease-in/out on each phase for impact feel
-            if (swingT < 0.4) {
-                const t = easeInOutQuad(swingT / 0.4);
-                armAngleR = -1.8 * t;
-                armAngleL = -1.4 * t;
-            } else if (swingT < 0.8) {
-                const t = easeInOutQuad((swingT - 0.4) / 0.4);
-                armAngleR = -1.8 + (1.8 + 1.2) * t;
-                armAngleL = -1.4 + (1.4 + 0.8) * t;
-            } else {
-                const t = easeInOutQuad((swingT - 0.8) / 0.2);
-                armAngleR = 1.2 * (1 - t);
-                armAngleL = 0.8 * (1 - t);
-            }
-            this.armR.rotation.x = armAngleR;
-            this.armL.rotation.x = armAngleL;
-            this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, smoothFactor(0.15, dt));
-            this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, smoothFactor(0.15, dt));
-            // C5: subtle forward torso lurch timed with the strike (peak at swingT ~0.6)
-            const lurcht = Math.max(0, Math.sin(swingT * Math.PI));
-            this.modelPivot.position.z = lurcht * 0.08;
-            this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, smoothFactor(0.1, dt));
-            // Relax any aerial torso lean — a swing always wins over the aerial pose,
-            // so a mid-air attack (including the always-visible FP arm) reads cleanly.
-            this.torso.rotation.x = THREE.MathUtils.lerp(this.torso.rotation.x, 0, smoothFactor(0.15, dt));
-        } else if (this.chopAnimState) {
-            const { isSwinging, swingProgress } = this.chopAnimState;
-            if (isSwinging) {
-                const t = 1.0 - swingProgress;
-                // C5: ease in/out on chop swing too
-                const swingAngle = -1.2 + easeInOutQuad(t) * 2.2;
-                this.armR.rotation.x = swingAngle;
-                // C5: subtle torso lurch at mid-swing
-                this.modelPivot.position.z = easeInOutQuad(Math.min(t * 2, 1) * Math.max(0, 1 - (t - 0.5) * 2)) * 0.07;
-            } else {
-                this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, -1.2, smoothFactor(0.15, dt));
-                this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, smoothFactor(0.15, dt));
-            }
-            this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, -0.3, smoothFactor(0.1, dt));
-            this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, smoothFactor(0.1, dt));
-            this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, smoothFactor(0.1, dt));
-            this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, smoothFactor(0.1, dt));
-            // Relax any aerial torso lean — the chop swing wins over the aerial pose.
-            this.torso.rotation.x = THREE.MathUtils.lerp(this.torso.rotation.x, 0, smoothFactor(0.15, dt));
-        } else if (isMoving && player.onGround) {
-            // Speed-matched walk cycle: advance a dedicated phase accumulator — NOT a
-            // retroactively scaled this.time, which would make the pose jump whenever
-            // the ratio changes mid-run — by effective speed (base + speed essence)
-            // over base speed. Speed-boosted feet now actually step faster instead of
-            // sliding across the ground at the old fixed cadence.
-            const speedRatio = player.speed > 0
-                ? (player.speed + (player.speedBoost || 0)) / player.speed
-                : 1;
-            this._walkPhase += dt * 10 * speedRatio;
-            const walkCycle = this._walkPhase;
-            this.legL.rotation.x = Math.sin(walkCycle) * 0.8;
-            this.legR.rotation.x = Math.sin(walkCycle + Math.PI) * 0.8;
-            this.armL.rotation.x = Math.sin(walkCycle + Math.PI) * 0.5;
-            this.armR.rotation.x = fpArmRaised
-                ? -1.2 + Math.sin(walkCycle) * 0.12 // raised, subtle bob
-                : Math.sin(walkCycle) * 0.5;
-            this.modelPivot.position.y = Math.abs(Math.sin(walkCycle * 2)) * 0.05;
-            this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, smoothFactor(0.1, dt));
-            // Relax any aerial torso lean picked up from a jump that just landed.
-            this.torso.rotation.x = THREE.MathUtils.lerp(this.torso.rotation.x, 0, smoothFactor(0.15, dt));
-        } else if (!player.onGround) {
-            // Aerial pose (jump/fall): legs tucked back (rear leg more), arms slightly
-            // raised, small forward torso lean — instead of falling through to the idle
-            // rest pose. smoothFactor(0.15, dt) eases it in on takeoff; landing recovers
-            // just as smoothly because onGround flipping back routes into the walk/idle
-            // branches, whose own smoothed lerps pull these joints back to rest.
-            // isAttacking/chopAnimState are checked earlier in this chain, so a swing
-            // in progress always wins — including the always-visible FP right arm.
-            const af = smoothFactor(0.15, dt);
-            this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0.3, af);
-            this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0.6, af); // rear leg tucks back more
-            this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, -0.3, af);
-            this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, fpArmRaised ? -1.2 : -0.3, af);
-            this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, af);
-            this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, af);
-            this.torso.rotation.x = THREE.MathUtils.lerp(this.torso.rotation.x, 0.12, af); // small forward lean
-        } else {
-            const lerp = smoothFactor(0.1, dt);
-            this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, lerp);
-            this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, lerp);
-            this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, 0, lerp);
-            this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, fpArmRaised ? -1.2 : 0, lerp);
-            this.modelPivot.position.y = THREE.MathUtils.lerp(this.modelPivot.position.y, 0, lerp);
-            this.modelPivot.position.z = THREE.MathUtils.lerp(this.modelPivot.position.z, 0, lerp);
-            // Relax any aerial torso lean picked up from a jump that just landed.
-            this.torso.rotation.x = THREE.MathUtils.lerp(this.torso.rotation.x, 0, lerp);
-        }
+    setBreachCharge(charge) {
+        this.breachCharge = playerClamp(charge, 0, 1);
+        this.state.breachCharge = this.breachCharge;
     }
 
     updateCamera(camera, dt = 0) {
-        if (!this.playerGroup) return;
-        const player = this.state.player;
+        if (!this.playerGroup || !this._currentPlanet) return;
+        const state = this.state;
+        const player = state.player;
         const ca = player.cameraAngle;
         const up = this._surfaceNormal;
+        const equipped = !!state.breachEquipped && !state.isOnBoat;
+        const aiming = !!state.breachAiming && equipped;
+        const charging = aiming;
 
-        // FOV speed kick: on-foot speed-sell for the speed essence, only while
-        // actually moving. Applied before the mode branch so it works in both
-        // third and first person.
-        // update() early-returns entirely while state.isDead, so _isMoving would
-        // otherwise freeze at whatever it was the instant death hit — treat death
-        // as not-moving here so the kick eases back to CAMERA_FOV during the
-        // death screen instead of staying stuck boosted.
-        const boostRatio = (this._isMoving && !this.state.isDead && player.speedBoost > 0 && PLAYER_SPEED_BOOST_CAP > 0)
-            ? Math.min(1, player.speedBoost / PLAYER_SPEED_BOOST_CAP)
-            : 0;
-        // First person uses a wider base FOV; the existing kick lerp doubles as
-        // a smooth zoom transition when toggling camera modes.
-        const baseFov = player.cameraMode === 'first' ? CAMERA_FOV_FIRST_PERSON : CAMERA_FOV;
-        const targetFov = baseFov + PLAYER_FOV_KICK * boostRatio;
-        const newFov = THREE.MathUtils.lerp(camera.fov, targetFov, smoothFactor(FOV_KICK_LERP, dt));
-        if (Math.abs(newFov - camera.fov) > 0.01) {
-            camera.fov = newFov;
+        const boostRatio = (this._isMoving && !state.isDead && player.speedBoost > 0 && PLAYER_SPEED_BOOST_CAP > 0)
+            ? Math.min(1, player.speedBoost / PLAYER_SPEED_BOOST_CAP) : 0;
+        const baseFov = player.cameraMode === 'first'
+            ? CAMERA_FOV_FIRST_PERSON
+            : (charging ? 52 : equipped ? 58 : CAMERA_FOV);
+        const sprintKick = PLAYER_FOV_KICK * boostRatio + this._runAmount * (this._isMoving ? 4.2 : 0);
+        const targetFov = baseFov + sprintKick;
+        const nextFov = THREE.MathUtils.lerp(camera.fov, targetFov, playerExpAlpha(9, dt || 1 / 60));
+        if (Math.abs(nextFov - camera.fov) > 0.01) {
+            camera.fov = nextFov;
             camera.updateProjectionMatrix();
         }
 
-        // Clamp vertical angle
-        if (player.cameraMode !== 'first') {
-            ca.y = Math.max(CAMERA_MIN_Y, Math.min(CAMERA_MAX_Y, ca.y));
-        }
+        if (player.cameraMode !== 'first') ca.y = playerClamp(ca.y, -0.28, CAMERA_MAX_Y);
 
         if (player.cameraMode === 'first') {
-            // Hide the body but keep the right arm (and whatever it's holding) so the
-            // held tool still reads in view, Minecraft-style, and its swing stays visible.
             this.setBodyVisible(false);
-
-            // First person: camera at player pos + up * eye height
-            const eyePos = player.pos.clone().add(up.clone().multiplyScalar(1.0));
+            const eyePos = player.pos.clone().addScaledVector(up, 1.43);
             camera.position.copy(eyePos);
-            this._applyCameraShake(camera);
-
-            // Look direction relative to surface frame
-            const lookFwd = this._surfaceForward.clone()
-                .multiplyScalar(-Math.cos(ca.y) * Math.cos(ca.x))
-                .add(this._surfaceRight.clone().multiplyScalar(-Math.cos(ca.y) * Math.sin(ca.x)))
-                .add(up.clone().multiplyScalar(Math.sin(ca.y)));
-
-            camera.lookAt(eyePos.clone().add(lookFwd));
+            const lookFwd = this._cameraLookDirection(ca, up);
             camera.up.copy(up);
-
-            // Sync the model's facing to the camera's yaw so the visible arm and the
-            // melee arc (getForward()/_playerForward) point where the crosshair looks.
-            // getForward() resolves a targetRotation of theta to
-            // surfaceForward*cos(theta) + surfaceRight*sin(theta) — the exact NEGATION
-            // of lookFwd's horizontal component at the same angle (see above). Naively
-            // setting targetRotation = ca.x would therefore face the body (and the
-            // held tool) directly away from the camera; adding PI flips it to match.
+            camera.lookAt(eyePos.clone().add(lookFwd).addScaledVector(up, this._cameraRecoil));
             player.targetRotation = ca.x + Math.PI;
-        } else {
-            this.setBodyVisible(true);
-
-            // Third person camera orbiting in the surface frame
-            const dist = CAMERA_DISTANCE;
-
-            // ca.x = horizontal orbit angle, ca.y = elevation angle
-            const horizDist = dist * Math.cos(ca.y);
-            const vertDist = dist * Math.sin(ca.y) + 0.8;
-
-            // Compute world offset using surface frame
-            const offset = this._surfaceForward.clone().multiplyScalar(horizDist * Math.cos(ca.x))
-                .add(this._surfaceRight.clone().multiplyScalar(horizDist * Math.sin(ca.x)))
-                .add(up.clone().multiplyScalar(vertDist));
-
-            const desiredPos = player.pos.clone().add(offset);
-            const lookTarget = player.pos.clone().add(up.clone().multiplyScalar(0.5));
-            if (!this._lookTarget) this._lookTarget = lookTarget.clone();
-
-            // Detect a teleport (disembark, respawn, out-of-bounds snap): the player
-            // jumps farther than any single on-foot frame ever could. Snap the camera
-            // and look target instead of slowly lerping them across the world.
-            const teleported = this._prevCamPlayerPos
-                && player.pos.distanceToSquared(this._prevCamPlayerPos) > 25; // > 5 units
-            if (!this._prevCamPlayerPos) this._prevCamPlayerPos = new THREE.Vector3();
-            this._prevCamPlayerPos.copy(player.pos);
-
-            if (teleported) {
-                camera.position.copy(desiredPos);
-                this._lookTarget.copy(lookTarget);
-            } else {
-                camera.position.lerp(desiredPos, smoothFactor(CAMERA_LERP, dt));
-                // C8: Smooth the lookAt target to avoid jarring snaps when surface normal changes fast
-                this._lookTarget.lerp(lookTarget, smoothFactor(0.2, dt));
-            }
             this._applyCameraShake(camera);
-            camera.lookAt(this._lookTarget);
-            camera.up.copy(up);
+            return;
         }
+
+        this.setBodyVisible(true);
+        const desiredDistance = charging ? 3.35 : equipped ? 4.55 : CAMERA_DISTANCE;
+        this._cameraDistance = THREE.MathUtils.lerp(this._cameraDistance, desiredDistance, playerExpAlpha(10, dt || 1 / 60));
+        const horiz = this._cameraDistance * Math.cos(ca.y);
+        const vert = this._cameraDistance * Math.sin(ca.y) + (aiming ? 1.00 : 0.84);
+        const orbitForward = this._surfaceForward.clone().multiplyScalar(Math.cos(ca.x))
+            .addScaledVector(this._surfaceRight, Math.sin(ca.x)).normalize();
+        const cameraRight = new THREE.Vector3().crossVectors(orbitForward, up).normalize();
+        const shoulder = aiming ? 0.72 : (equipped ? 0.24 : 0);
+        const offset = orbitForward.clone().multiplyScalar(horiz)
+            .addScaledVector(up, vert - this._landingKick)
+            .addScaledVector(cameraRight, shoulder);
+        const desiredPos = player.pos.clone().add(offset);
+
+        // Keep the camera above the displaced spherical terrain instead of letting
+        // close shoulder views tunnel into hills or the far side of a small planet.
+        const camNormal = desiredPos.clone().sub(this._currentPlanet.center).normalize();
+        const camTerrain = SphericalUtils.sampleTerrainHeight(this._currentPlanet, camNormal);
+        const camRadius = desiredPos.distanceTo(this._currentPlanet.center);
+        if (camRadius < camTerrain + 0.28) desiredPos.copy(this._currentPlanet.center).addScaledVector(camNormal, camTerrain + 0.28);
+
+        const aimDir = this._cameraLookDirection(ca, up);
+        const lookTarget = player.pos.clone()
+            .addScaledVector(up, aiming ? 0.93 : 0.78)
+            .addScaledVector(aimDir, aiming ? 1.15 : (equipped ? 0.22 : 0))
+            .addScaledVector(up, this._cameraRecoil);
+
+        // Shoulder cameras need a true line-of-sight collision test. The radial
+        // clamp above only prevents entering the planet; this ray also prevents
+        // hills and ridges from sitting between the character and the camera.
+        if (this._currentPlanet.groundMesh) {
+            const cameraPath = desiredPos.clone().sub(lookTarget);
+            const cameraPathLength = cameraPath.length();
+            if (cameraPathLength > 0.15) {
+                this._cameraRaycaster.set(lookTarget, cameraPath.normalize());
+                this._cameraRaycaster.near = 0.12;
+                this._cameraRaycaster.far = cameraPathLength;
+                this._currentPlanet.groundMesh.updateWorldMatrix(true, false);
+                const cameraHits = this._cameraRaycaster.intersectObject(this._currentPlanet.groundMesh, false);
+                if (cameraHits.length && cameraHits[0].distance < cameraPathLength) {
+                    const safeDistance = Math.max(0.55, cameraHits[0].distance - 0.24);
+                    desiredPos.copy(lookTarget).addScaledVector(cameraPath, safeDistance);
+                }
+            }
+        }
+        if (!this._lookTarget) this._lookTarget = lookTarget.clone();
+
+        const teleported = this._prevCamPlayerPos && player.pos.distanceToSquared(this._prevCamPlayerPos) > 25;
+        if (!this._prevCamPlayerPos) this._prevCamPlayerPos = new THREE.Vector3();
+        this._prevCamPlayerPos.copy(player.pos);
+        if (teleported) {
+            camera.position.copy(desiredPos);
+            this._lookTarget.copy(lookTarget);
+        } else {
+            camera.position.lerp(desiredPos, playerExpAlpha(aiming ? 13 : 9, dt || 1 / 60));
+            this._lookTarget.lerp(lookTarget, playerExpAlpha(aiming ? 18 : 12, dt || 1 / 60));
+        }
+        camera.up.copy(up);
+        camera.lookAt(this._lookTarget);
+        this._applyCameraShake(camera);
     }
 
-    /**
-     * Apply the current camera-shake magnitude (state.cameraShake, decayed each
-     * frame by ParticleSystem) as a small random offset to the camera's FINAL
-     * position. Called after the position is fully resolved (post-lerp for third
-     * person, post-copy for first person) and before lookAt(), so the look
-     * direction re-settles onto the same aim point from the jittered position —
-     * that's what reads as "shake" rather than a plain camera translate.
-     */
+    _cameraLookDirection(ca, up) {
+        const horizontal = this._surfaceForward.clone().multiplyScalar(-Math.cos(ca.x))
+            .addScaledVector(this._surfaceRight, -Math.sin(ca.x));
+        return horizontal.multiplyScalar(Math.cos(ca.y)).addScaledVector(up, Math.sin(ca.y)).normalize();
+    }
+
     _applyCameraShake(camera) {
         const shake = this.state.cameraShake;
         if (!shake) return;
@@ -622,41 +419,66 @@ export default class PlayerController {
         camera.position.z += (Math.random() - 0.5) * 2 * shake;
     }
 
-    /** Get the current surface normal (up direction) */
-    getSurfaceNormal() {
-        return this._surfaceNormal.clone();
+    onProceduralFootstep(position, normal, speed01) {
+        if (!this.world?.scene || speed01 < 0.08) return;
+        if (this.footprints.length >= 26) {
+            const oldest = this.footprints.shift();
+            this.world.remove(oldest.mesh);
+            oldest.mesh.material.dispose();
+        }
+        const material = new THREE.MeshBasicMaterial({
+            color: 0x162019, transparent: true, opacity: 0.12 + speed01 * 0.12,
+            depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2
+        });
+        const mesh = new THREE.Mesh(this._footprintGeometry, material);
+        const forward = this.getForward().projectOnPlane(normal);
+        if (forward.lengthSq() < PLAYER_EPS) forward.copy(SphericalUtils._getArbitraryTangent(normal));
+        else forward.normalize();
+        const right = new THREE.Vector3().crossVectors(forward, normal).normalize();
+        this._footprintBasis.makeBasis(right, forward, normal);
+        mesh.quaternion.setFromRotationMatrix(this._footprintBasis);
+        mesh.position.copy(position).addScaledVector(normal, 0.008);
+        mesh.scale.set(0.58, 1.18, 1);
+        this.world.add(mesh);
+        this.footprints.push({ mesh, age: 0, life: 4.8, startOpacity: material.opacity });
+        if (this.state.addShake) this.state.addShake(0.0015 + speed01 * 0.0025);
+        this.audio?.step?.(speed01);
     }
 
-    /** Get the current planet the player is on */
-    getCurrentPlanet() {
-        return this._currentPlanet;
+    _updateFootprints(dt) {
+        for (let i = this.footprints.length - 1; i >= 0; i--) {
+            const footprint = this.footprints[i];
+            footprint.age += dt;
+            footprint.mesh.material.opacity = footprint.startOpacity * Math.max(0, 1 - footprint.age / footprint.life);
+            if (footprint.age >= footprint.life) {
+                this.world.remove(footprint.mesh);
+                footprint.mesh.material.dispose();
+                this.footprints.splice(i, 1);
+            }
+        }
     }
 
-    getPosition() {
-        return this.state.player.pos;
-    }
+    getSurfaceNormal() { return this._surfaceNormal.clone(); }
+    getGroundNormal() { return this._groundNormal.clone(); }
+    getCurrentPlanet() { return this._currentPlanet; }
+    getPosition() { return this.state.player.pos; }
 
     getForward() {
-        if (!this.modelPivot) return new THREE.Vector3(0, 0, 1);
-        const fwd = new THREE.Vector3(0, 0, 1);
-        fwd.applyQuaternion(this.modelPivot.quaternion);
-        // Transform by playerGroup orientation
-        fwd.applyQuaternion(this.playerGroup.quaternion);
-        return fwd;
+        if (!this.playerGroup) return new THREE.Vector3(0, 0, 1);
+        const yaw = this.state.player.targetRotation || 0;
+        const local = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+        return local.applyQuaternion(this.playerGroup.quaternion).normalize();
     }
 
-    /**
-     * Facing yaw measured against the canonical tangent frame at the player's
-     * position (SphericalUtils._getArbitraryTangent of the surface normal).
-     * Unlike targetRotation — which is relative to _surfaceForward, a frame
-     * maintained incrementally and therefore path-dependent — this angle can be
-     * reconstructed by remote clients from position alone, so it's what
-     * NetworkManager broadcasts as `rotation`.
-     */
+    getWeaponWorldTransform(positionTarget = new THREE.Vector3(), directionTarget = new THREE.Vector3()) {
+        if (this.rig) return this.rig.getWeaponWorldTransform(positionTarget, directionTarget);
+        positionTarget.copy(this.state.player.pos).addScaledVector(this._surfaceNormal, 0.9);
+        directionTarget.copy(this.getForward());
+        return { position: positionTarget, direction: directionTarget };
+    }
+
     getCanonicalRotation() {
-        if (!this.playerGroup || !this._currentPlanet) {
-            return this.state.player.targetRotation || 0;
-        }
+        if (!this.playerGroup || !this._currentPlanet) return this.state.player.targetRotation || 0;
         const up = SphericalUtils.getSurfaceNormal(this.state.player.pos, this._currentPlanet);
         const t0 = SphericalUtils._getArbitraryTangent(up);
         const r0 = new THREE.Vector3().crossVectors(up, t0);
@@ -665,9 +487,17 @@ export default class PlayerController {
     }
 
     remove() {
+        for (const footprint of this.footprints) {
+            this.world.remove(footprint.mesh);
+            footprint.mesh.material.dispose();
+        }
+        this.footprints.length = 0;
         if (this.playerGroup) {
             this.world.remove(this.playerGroup);
             this.playerGroup = null;
+            this.modelPivot = null;
+            this.rig = null;
         }
     }
 }
+
