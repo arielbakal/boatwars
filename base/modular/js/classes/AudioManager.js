@@ -36,6 +36,10 @@ export default class AudioManager {
     place() { this.chirp(500, 300, 0.2, 0.1); }
     pop() { this.chirp(800, 1000, 0.1, 0.05); }
     chop() { this.chirp(400, 200, 0.08, 0.12); }
+    step(speed01 = 0.5) { this.chirp(105 + speed01 * 34, 54 + speed01 * 18, 0.075, 0.018 + speed01 * 0.022); }
+    attack() { this.chirp(150, 55, 0.12, 0.11); }
+    hit() { this.chirp(430, 170, 0.09, 0.07); }
+    purge() { this.chirp(180, 720, 0.32, 0.09); }
     treeFall() { this.chirp(300, 80, 0.4, 0.15); }
     sail() { this.chirp(200, 350, 0.3, 0.08); setTimeout(() => this.chirp(350, 500, 0.2, 0.06), 200); }
     boatBuild() { this.chirp(300, 600, 0.3, 0.1); setTimeout(() => this.chirp(600, 800, 0.15, 0.08), 200); setTimeout(() => this.chirp(800, 1000, 0.1, 0.06), 400); }
@@ -150,3 +154,4 @@ export default class AudioManager {
 
     fadeOut() { if (this.synth) this.synth.volume = 0; }
 }
+

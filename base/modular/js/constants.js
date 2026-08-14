@@ -5,7 +5,11 @@
 // Physics
 export const GRAVITY = 0.015;
 export const JUMP_FORCE = 0.2;
-export const PLAYER_SPEED = 0.12;
+// Lowered from 0.12. At 0.12 the character crossed 3-5 body lengths per second (a
+// real sprinter manages ~2.5), faster than legs of this length can stride at any
+// plausible cadence, so the gait could only ever slide or blur. GameState reads
+// this now; it previously hardcoded its own 0.12 and this constant went unused.
+export const PLAYER_SPEED = 0.06;
 export const PLAYER_RADIUS = 0.4;
 export const PLAYER_SURFACE_HEIGHT = 0.05;  // ground snap height above surface
 export const GRAVITY_REFERENCE_RADIUS = 15; // planet radius at which gravity = GRAVITY
@@ -26,7 +30,7 @@ export const CAMERA_MIN_Y = 0.1;
 export const CAMERA_MAX_Y = 1.4;
 
 // Rendering
-export const RENDER_SCALE = 0.5;
+export const RENDER_SCALE = 0.92;
 export const GROUND_LEVEL = -1.4; // O_Y (legacy, unused in spherical mode)
 
 // Interaction

@@ -1,3 +1,5 @@
+
+
 import LLMService from '../services/LLMService.js';
 
 export default class ChatManager {
@@ -45,7 +47,11 @@ export default class ChatManager {
         this.ui.input.focus();
 
         // Load Lore
-        let lore = "You are a generic NPC.";
+        let lore = `You are Chief Ruru, guardian of the Starting Planet in a five-world solar system.
+You are small, proud, mystical, slightly paranoid, and friendly.
+The player is a sky-traveler who must build a ship and purge the blight from every planetary world-heart.
+Warn them that the central sun is lethal and that four nearby logs can become a spacecraft.
+Always refer to yourself in third person as "Great Ruru" and keep replies to two or three sentences.`;
         if (entity.userData.loreFile) {
             try {
                 const res = await fetch(entity.userData.loreFile);
@@ -102,3 +108,4 @@ export default class ChatManager {
         this.ui.input.focus();
     }
 }
+

@@ -20,12 +20,13 @@ import EntityAISystem from '../systems/EntityAISystem.js';
 import CatAI from '../systems/CatAI.js';
 import ParticleSystem from '../systems/ParticleSystem.js';
 import CombatSystem from '../systems/CombatSystem.js';
+import BreachSystem from '../systems/BreachSystem.js';
 
 import NetworkManager from '../network/NetworkManager.js';
 import RemotePlayerManager from '../network/RemotePlayerManager.js';
 import SeededRandom from '../network/SeededRandom.js';
 
-import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV, RENDER_SCALE, STACKS_BY_TYPE, SHIP_LOG_CLUSTER_RADIUS, SUN_POSITION, SUN_RADIUS, MINABLE_ROCK_TYPES } from '../constants.js';
+import { PLANETS, TIER_MODIFIERS, CREATURE_CONTACT_DAMAGE, CAMERA_FOV, RENDER_SCALE, STACKS_BY_TYPE, SHIP_LOG_CLUSTER_RADIUS, SUN_POSITION, SUN_RADIUS, MINABLE_ROCK_TYPES, CRYSTAL_ESSENCE_MAP } from '../constants.js';
 import { smoothFactor } from './Easing.js';
 
 export default class GameEngine {
@@ -35,6 +36,7 @@ export default class GameEngine {
         this.world = new WorldManager(RENDER_SCALE);
         this.factory = new EntityFactory(this.world, this.state);
         this.playerController = new PlayerController(this.world, this.state);
+        this.playerController.audio = this.audio;
         this.spheres = [];
         this.islandGroups = [];
         // Atmosphere shells tracked separately from islandGroups so animate() can
@@ -58,6 +60,7 @@ export default class GameEngine {
         this.catAI = new CatAI();
         this.particleSystem = new ParticleSystem();
         this.combatSystem = new CombatSystem(this.ui);
+        this.breachSystem = new BreachSystem(this.ui);
 
         this.systems.register('boat', this.boatSystem);
         this.systems.register('chop', this.chopSystem);
@@ -81,6 +84,11 @@ export default class GameEngine {
         this.chatManager = new ChatManager(this);
         this.input = new InputHandler(this);
         this.setupButtons();
+        if (this.ui.pixelSlider) {
+            const applyPixelation = () => this.world.applyPixelation(parseFloat(this.ui.pixelSlider.value) || 0);
+            this.ui.pixelSlider.addEventListener('input', applyPixelation);
+            applyPixelation();
+        }
         this.initGame(null);
         this.animate = this.animate.bind(this);
         this.animate(0);
@@ -98,6 +106,7 @@ export default class GameEngine {
         this.ui.craftHint = document.getElementById('craft-hint');
         this.ui.volSlider = document.getElementById('vol-slider');
         this.ui.volIcon = document.getElementById('vol-icon');
+        this.ui.pixelSlider = document.getElementById('pixel-slider');
         this.ui.settingsBtn = document.getElementById('settings-btn');
         this.ui.settingsPopup = document.getElementById('settings-popup');
         this.ui.chopIndicator = document.getElementById('chop-indicator');
@@ -109,6 +118,7 @@ export default class GameEngine {
         this.ui.hpFill = document.getElementById('hp-fill');
         this.ui.hpText = document.getElementById('hp-text');
         this.ui.deathScreen = document.getElementById('death-screen');
+        this.ui.breachHud = document.getElementById('breach-hud');
         for (let i = 0; i < 8; i++) {
             const div = document.createElement('div');
             div.className = 'slot';
@@ -197,6 +207,7 @@ export default class GameEngine {
         // also doubles as the source of truth animate() checks below.
         if (this.state.isResettingWorld) return;
         this.state.isResettingWorld = true;
+        if (this.breachSystem) this.breachSystem.cleanup();
         this.audio.explode();
         this.ui.flash.style.opacity = 1;
         setTimeout(() => this.ui.flash.style.opacity = 0, 500);
@@ -328,6 +339,9 @@ export default class GameEngine {
 
         this.state.phase = 'playing';
         this.state.palette = this.factory.generatePalette(sphereColor, PLANETS[0].eco);
+        const voidColor = (this.state.palette.shadow || new THREE.Color(0x070914)).clone().lerp(new THREE.Color(0x02030a), 0.62);
+        this.world.scene.background.copy(voidColor);
+        if (this.world.scene.fog && this.world.scene.fog.color) this.world.scene.fog.color.copy(voidColor);
         // C1: state.worldDNA stays a session-wide roll for non-planet consumers only
         // (currently: AudioManager.startMusic's procedural seed). Each planet below
         // rolls its OWN fresh DNA (planetDNA1..5) right after its islands.push() so
@@ -375,6 +389,16 @@ export default class GameEngine {
                 }
             }
             return pts;
+        };
+        // Deterministic tutorial-ring placement. Essential tools and the first
+        // repair resources are visible within a short walk, while the wreck is
+        // deliberately spawned farther out in a separate clear sector.
+        const pointFromPole = (planet, distance, angle = 0) => {
+            const pole = planet.center.clone().add(new THREE.Vector3(0, planet.radius, 0));
+            const normal = new THREE.Vector3(0, 1, 0);
+            const tangent = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)).projectOnPlane(normal).normalize();
+            try { return SphericalUtils.moveOnSurface(pole, tangent, distance, planet); }
+            catch (_) { return pole.clone().addScaledVector(tangent, distance); }
         };
         // Ecosystem density scaling — humid worlds grow more flora clusters,
         // dry worlds expose more rock. eco values are static constants, so the
@@ -436,13 +460,32 @@ export default class GameEngine {
             this.placeOnPlanet(e, planet1, pos);
             this.state.entities.push(e); this.world.add(e);
         }
+        // Starter ecology ring: nearby trees, ordinary mineable rocks and a small
+        // pond ensure the repair loop never depends on a lucky full-sphere spawn.
+        for (let i = 0; i < 4; i++) {
+            const pos = pointFromPole(planet1, 4.8 + (i % 2) * 1.1, -1.10 + i * 0.34);
+            const tree = this.factory.createTree(this.state.palette, 0, 0, this._treeStyleFromDNA(planetDNA1, this.state.palette));
+            this.placeOnPlanet(tree, planet1, pos);
+            tree.userData.starterResource = true;
+            this.state.entities.push(tree); this.world.add(tree);
+        }
+        for (let i = 0; i < 5; i++) {
+            const pos = pointFromPole(planet1, 5.4 + (i % 3) * 0.65, 0.70 + i * 0.24);
+            const rock = this.factory.createRock(this.state.palette, 0, 0, this._rockStyleFromDNA(planetDNA1, this.state.palette));
+            this.placeOnPlanet(rock, planet1, pos);
+            rock.userData.starterResource = true;
+            this.state.entities.push(rock); this.world.add(rock);
+        }
+        const starterPond = this.factory.createPond(this.state.palette, 0, 0, 0.82);
+        this.placeOnPlanet(starterPond, planet1, pointFromPole(planet1, 7.0, Math.PI));
+        this.state.entities.push(starterPond); this.world.add(starterPond);
         // Creatures on planet 1 — friendly fauna only: the starting planet is
         // the tutorial space, so its creatures never aggro (no ambient
         // hostility, no retaliation when attacked — see the friendly guards in
         // EntityAISystem.updateCreature and CombatSystem._damageEntity).
         const speciesTypes = ['blobby', 'blocky', 'conehead'];
-        for (let i = 0; i < 5; i++) {
-            const pos = rndAnywhere(planet1);
+        for (let i = 0; i < 8; i++) {
+            const pos = i < 2 ? pointFromPole(planet1, 7.0 + i * 1.2, -0.25 + i * 0.55) : rndAnywhere(planet1);
             const creatureDNA = this.factory.generateCreatureDNA(this.state.palette, speciesTypes[i % speciesTypes.length]);
             const c = this.factory.createCreature(this.state.palette, 0, 0, creatureDNA);
             this.placeOnPlanet(c, planet1, pos);
@@ -454,18 +497,18 @@ export default class GameEngine {
             this.state.entities.push(c); this.world.add(c);
         }
         // Chief
-        const chiefPos = rndSurface(planet1, 3.0, 8.0);
+        const chiefPos = pointFromPole(planet1, 4.2, -0.15);
         const chief = this.factory.createChief(this.state.palette, 0, 0);
         this.placeOnPlanet(chief, planet1, chiefPos);
         this.state.entities.push(chief); this.world.add(chief);
         // Axe
-        const axePos = rndSurface(planet1, 2.0, 12.0);
+        const axePos = pointFromPole(planet1, 2.8, -0.72);
         const axe = this.factory.createAxe(this.state.palette, 0, 0);
         this.placeOnPlanet(axe, planet1, axePos);
         this.state.entities.push(axe); this.world.add(axe);
         // Sword — melee weapon so creatures can be fought without the axe
         // (whose click chops the tree under the crosshair instead of swinging)
-        const swordPos = rndSurface(planet1, 2.0, 12.0);
+        const swordPos = pointFromPole(planet1, 3.8, 0.52);
         const sword = this.factory.createSword(this.state.palette, 0, 0);
         this.placeOnPlanet(sword, planet1, swordPos);
         this.state.entities.push(sword); this.world.add(sword);
@@ -535,9 +578,9 @@ export default class GameEngine {
         this.placeOnPlanet(pickaxe, planet2, pickPos);
         this.state.entities.push(pickaxe); this.world.add(pickaxe);
         // Creatures on planet 2
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 6; i++) {
             const pos = rndAnywhere(planet2);
-            const creatureDNA = this.factory.generateCreatureDNA(palette2, speciesTypes[i]);
+            const creatureDNA = this.factory.generateCreatureDNA(palette2, speciesTypes[i % speciesTypes.length]);
             const c = this.factory.createCreature(palette2, 0, 0, creatureDNA);
             this.placeOnPlanet(c, planet2, pos);
             c.userData.boundCenter = planet2.center.clone();
@@ -696,9 +739,9 @@ export default class GameEngine {
             this.placeOnPlanet(crystal, planet4, pos);
             this.state.entities.push(crystal); this.world.add(crystal);
         }
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 5; i++) {
             const pos = rndAnywhere(planet4);
-            const creatureDNA = this.factory.generateCreatureDNA(palette4, speciesTypes[i]);
+            const creatureDNA = this.factory.generateCreatureDNA(palette4, speciesTypes[i % speciesTypes.length]);
             const c = this.factory.createCreature(palette4, 0, 0, creatureDNA);
             this.placeOnPlanet(c, planet4, pos);
             c.userData.boundCenter = planet4.center.clone();
@@ -761,9 +804,9 @@ export default class GameEngine {
             this.placeOnPlanet(crystal, planet5, pos);
             this.state.entities.push(crystal); this.world.add(crystal);
         }
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 5; i++) {
             const pos = rndAnywhere(planet5);
-            const creatureDNA = this.factory.generateCreatureDNA(palette5, speciesTypes[i]);
+            const creatureDNA = this.factory.generateCreatureDNA(palette5, speciesTypes[i % speciesTypes.length]);
             const c = this.factory.createCreature(palette5, 0, 0, creatureDNA);
             this.placeOnPlanet(c, planet5, pos);
             c.userData.boundCenter = planet5.center.clone();
@@ -807,7 +850,7 @@ export default class GameEngine {
         // Spawn cat on planet 1 surface near player
         const catSurfacePos = SphericalUtils.randomSurfacePointNear(planet1, spawnPos, 1.0, 3.0);
         this.playerCat = this.factory.createCat(0, 0);
-        this.playerCat.scale.set(0.15, 0.15, 0.15);
+        this.playerCat.scale.set(0.82, 0.82, 0.82);
         this.placeOnPlanet(this.playerCat, planet1, catSurfacePos);
         this.state.entities.push(this.playerCat);
         this.world.add(this.playerCat);
@@ -824,6 +867,13 @@ export default class GameEngine {
         }
 
         if (seededOverride) seededOverride.restore();
+
+        // Terrarium Breach layer: populate every spherical planet with its own
+        // world-heart, blight population, ranged weapon progression, and ecology state.
+        this.breachSystem.initialize(this.state.islands, {
+            state: this.state, world: this.world, playerController: this.playerController,
+            factory: this.factory, audio: this.audio
+        });
 
         // Rebuild complete — safe again for animate() to touch the player model.
         this.state.isResettingWorld = false;
@@ -889,25 +939,35 @@ export default class GameEngine {
     // so every instance owns its own THREE.Color (matches prior fallback
     // behavior, avoids aliasing across entities).
     _treeStyleFromDNA(dna, p) {
+        const treeChoices = ['umbrella', 'bulb', 'spire', 'coral', 'fan', 'spiral'];
+        const archetype = Math.random() < 0.58 && dna.tree.archetype ? dna.tree.archetype : treeChoices[Math.floor(Math.random() * treeChoices.length)];
         return {
-            color: p.flora.clone(), trunkColor: p.trunk.clone(), shape: dna.tree.shape,
-            height: 1.5 * dna.tree.heightMod + Math.random() * 0.5, thickness: 0.2 * dna.tree.thickMod
+            color: p.flora.clone(), accentColor: (p.floraAccent || p.accent).clone(), trunkColor: p.trunk.clone(), shape: dna.tree.shape,
+            archetype,
+            height: 1.45 * dna.tree.heightMod + Math.random() * 0.55, thickness: 0.18 * dna.tree.thickMod,
+            canopyLayers: dna.tree.canopyLayers || 3, twist: (dna.tree.twist || 0) + (Math.random() - 0.5) * 0.18
         };
     }
     _bushStyleFromDNA(dna, p) {
-        return { color: p.flora.clone(), shape: dna.bush.shape, scaleY: dna.bush.scaleY };
+        const bushChoices = ['coral', 'succulent', 'pod', 'fan', 'anemone'];
+        const archetype = Math.random() < 0.55 && dna.bush.archetype ? dna.bush.archetype : bushChoices[Math.floor(Math.random() * bushChoices.length)];
+        return { color: p.flora.clone(), accentColor: (p.floraAccent || p.accent).clone(), shape: dna.bush.shape, archetype, scaleY: dna.bush.scaleY, lobes: dna.bush.lobes || 4, berries: dna.bush.berries };
     }
     _rockStyleFromDNA(dna, p) {
         return { color: p.baseRock.clone(), shape: dna.rock.shape };
     }
     _grassStyleFromDNA(dna, p) {
-        return { color: p.tallGrass.clone(), height: dna.grass.height };
+        const variants = ['meadow', 'fern', 'reed', 'ribbon', 'spore'];
+        const variant = Math.random() < 0.52 && dna.grass.variant ? dna.grass.variant : variants[Math.floor(Math.random() * variants.length)];
+        return { color: p.tallGrass.clone(), accentColor: (p.floraAccent || p.accent).clone(), height: dna.grass.height * (0.82 + Math.random() * 0.35), variant };
     }
     _creatureStyleFromDNA(dna, p) {
         return {
             color: p.creature.clone(), bodyShape: dna.creature.shape, speciesType: dna.creature.speciesType,
             eyeCount: dna.creature.eyes, scale: dna.creature.scale, eyeScale: dna.creature.eyeScale,
-            moveSpeed: dna.creature.moveSpeed, temperament: dna.creature.temperament
+            moveSpeed: dna.creature.moveSpeed, temperament: dna.creature.temperament,
+            accentColor: (p.accent || p.floraAccent).clone(), trait: dna.creature.trait || 'antennae',
+            markings: dna.creature.markings || 2, glow: false
         };
     }
 
@@ -1263,7 +1323,9 @@ export default class GameEngine {
                 boatSystem: this.boatSystem,
                 remotePlayers: this.remotePlayers,
                 t,
-                broadcastWorldEvent: (action, x, z, extra) => this.broadcastWorldEvent(action, x, z, extra)
+                broadcastWorldEvent: (action, x, z, extra) => this.broadcastWorldEvent(action, x, z, extra),
+                engineCombatSystem: this.combatSystem,
+                breachSystem: this.breachSystem
             };
 
             // Skip every system below that touches the player model while
@@ -1307,6 +1369,7 @@ export default class GameEngine {
 
                 // Combat
                 this.combatSystem.update(dt, ctx);
+                this.breachSystem.update(dt, ctx);
                 this.updateIslandIndicator();
 
                 // Surface lighting follows the local ecosystem: the outermost
@@ -1320,6 +1383,7 @@ export default class GameEngine {
                     this.world.ambientLight.intensity, this.world.ambientBaseIntensity * lightLevel, lightEase);
                 this.world.sunLight.intensity = THREE.MathUtils.lerp(
                     this.world.sunLight.intensity, this.world.sunBaseIntensity * lightLevel, lightEase);
+                this.world.updateLocalSun(state.isOnBoat && state.activeBoat ? state.activeBoat.position : state.player.pos);
 
                 // Entity AI
                 this.entityAISystem.update(dt, ctx);
@@ -1347,3 +1411,4 @@ export default class GameEngine {
         this.world.render();
     }
 }
+
