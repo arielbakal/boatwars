@@ -2,6 +2,8 @@
 // GAME STATE CLASS
 // =====================================================
 
+import { PLAYER_SPEED } from '../constants.js';
+
 export default class GameState {
     constructor() {
         this.reset();
@@ -25,7 +27,7 @@ export default class GameState {
         this.player = {
             pos: new THREE.Vector3(0, 0, 0),
             vel: new THREE.Vector3(0, 0, 0),
-            speed: 0.12,
+            speed: PLAYER_SPEED,
             onGround: false,
             targetRotation: 0,
             cameraAngle: { x: 0, y: 0.3 }, // x = horizontal orbit, y = vertical orbit
@@ -48,6 +50,10 @@ export default class GameState {
         // reliable for catching on a 20Hz send tick under packet-timing edge cases.
         this.attackSeq = 0;
         this.invincibleTimer = 0;
+        this.breachEquipped = false;
+        this.breachAiming = false;
+        this.breachKills = 0;
+        this.breachTotal = 0;
         this.isDead = false;
         this.deathTimer = 0;
         this.statBoosts = [];
@@ -135,3 +141,4 @@ export default class GameState {
         this.cameraShake = Math.min(0.5, (this.cameraShake || 0) + amount);
     }
 }
+
